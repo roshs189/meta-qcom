@@ -1,6 +1,6 @@
 DESCRIPTION = "QCOM NHLOS Firmware for Qualcomm Nord platform"
 LICENSE = "LICENSE.qcom-2"
-LIC_FILES_CHKSUM = "file://${UNPACKDIR}/${BOOTBINARIES}/LICENSE.qcom-2.txt;md5=TODO_FILL_IN_NORD_LICENSE_MD5SUM"
+LIC_FILES_CHKSUM = "file://${UNPACKDIR}/${BOOTBINARIES}/LICENSE.qcom-2;md5=165287851294f2fb8ac8cbc5e24b02b0"
 
 FW_ARTIFACTORY = "artifactory-las.qualcomm.com/artifactory/lint-lv-local/nord-test"
 BOOTBINARIES = "NORD_bootbinaries"
