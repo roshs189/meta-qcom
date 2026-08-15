@@ -1,0 +1,543 @@
+From 5658fdc1558e2cf9e9adc397b46d130c1740e7af Mon Sep 17 00:00:00 2001
+From: Igor Opaniuk <igor.opaniuk@oss.qualcomm.com>
+Date: Tue, 28 Jul 2026 09:11:40 +0200
+Subject: [PATCH] meson: make zip container support optional
+
+qdl unconditionally links against libzip, although zip archives are
+just one of the supported input formats: both the flash-from-zip path
+and the create-zip subcommand are conveniences on top of the plain
+contents.xml / flashmap.json flows.
+
+That unconditional dependency gets in the way of integrating qdl into
+minimal embedded distributions. In Yocto, for example, libzip lives in
+meta-openembedded rather than oe-core, so packaging qdl means pulling
+in a whole extra layer for a feature many products never use.
+
+Introduce a zip-container feature option (default auto) and gate all
+libzip-backed code on it:
+
+- move the libzip implementation out of file.c into file_zip.c, which
+  is only compiled when the feature is enabled; file.c keeps the plain
+  POSIX file handling and dispatches through small helpers that turn
+  into inert stubs in file.h otherwise
+- provide no-zip fallbacks of qdl_zip_open/get/put where open reports
+  "not a zip archive", so the contents.xml and flashmap.json flows
+  work unchanged; these remain real symbols rather than inline stubs
+  because the unit tests replace them with mock definitions
+- build zipper.c only with the feature and stub out zipper_write(),
+  with create-zip and a failed flash of a zip archive reporting that
+  this qdl was built without zip-container support
+
+Upstream-Status: Submitted [https://github.com/linux-msm/qdl/pull/299]
+
+Signed-off-by: Igor Opaniuk <igor.opaniuk@oss.qualcomm.com>
+---
+ README.md       |  10 +++++
+ meson.build     |  16 +++++--
+ meson.options   |   1 +
+ src/file.c      | 113 +++++++++++++-----------------------------------
+ src/file.h      |  47 ++++++++++++++++++++
+ src/file_zip.c  | 102 +++++++++++++++++++++++++++++++++++++++++++
+ src/flashmap.h  |  18 ++++++++
+ src/meson.build |   8 +++-
+ src/qdl.c       |   7 +++
+ 9 files changed, 236 insertions(+), 86 deletions(-)
+ create mode 100644 src/file_zip.c
+
+diff --git a/README.md b/README.md
+index 53c5f58..550e68a 100644
+--- a/README.md
++++ b/README.md
+@@ -63,6 +63,16 @@ meson setup build
+ meson compile -C build
+ ```
+ 
++### Build options
++
++libzip is only needed for zip container support - flashing directly from
++zip archives and the `create-zip` subcommand. To build a leaner QDL
++without it, disable the `zip-container` feature:
++
++```bash
++meson setup build -Dzip-container=disabled
++```
++
+ ## Use QDL
+ 
+ ### EDL mode
+diff --git a/meson.build b/meson.build
+index 02a9348..8009de5 100644
+--- a/meson.build
++++ b/meson.build
+@@ -21,7 +21,7 @@ endif
+ # Dependencies
+ libusb_dep = dependency('libusb-1.0')
+ libxml_dep = dependency('libxml-2.0')
+-libzip_dep = dependency('libzip')
++libzip_dep = dependency('libzip', required: get_option('zip-container'))
+ help2man = find_program('help2man', required: false)
+ cmocka_dep = dependency('cmocka', required: get_option('tests'))
+ 
+@@ -43,14 +43,24 @@ if host_machine.system() == 'windows'
+   ]
+ endif
+ 
+-common_dep = [libusb_dep, libxml_dep, libzip_dep, ws2_dep, setupapi_dep]
++common_dep = [libusb_dep, libxml_dep, ws2_dep, setupapi_dep]
++compile_view_deps = [libusb_dep, libxml_dep]
++
++# Zip container support is optional; sources gate zip-specific code on
++# HAVE_ZIP_CONTAINER and src/meson.build drops the libzip-backed sources
++# when it is disabled.
++if libzip_dep.found()
++  add_project_arguments('-DHAVE_ZIP_CONTAINER', language: 'c')
++  common_dep += libzip_dep
++  compile_view_deps += libzip_dep
++endif
+ 
+ # Compile-only view of common_dep (includes + cflags, no link args).
+ # Used on executables so their own sources see the headers, while link
+ # args propagate exactly once through the static library below, avoiding
+ # duplicate "-l..." entries on the link line.
+ common_compile_dep = []
+-foreach d : [libusb_dep, libxml_dep, libzip_dep]
++foreach d : compile_view_deps
+   common_compile_dep += d.partial_dependency(compile_args: true, includes: true)
+ endforeach
+ 
+diff --git a/meson.options b/meson.options
+index 174e3d8..197e3c3 100644
+--- a/meson.options
++++ b/meson.options
+@@ -1,3 +1,4 @@
+ option('VERSION', type: 'string', value: '', description: 'Project version')
+ option('tests', type: 'feature', value: 'auto', description: 'Build unit tests (requires cmocka)')
+ option('nbdkit', type: 'feature', value: 'auto', description: 'Build the nbdkit plugin (requires nbdkit)')
++option('zip-container', type: 'feature', value: 'auto', description: 'Flash from and create zip archives (requires libzip)')
+diff --git a/src/file.c b/src/file.c
+index c74a1ae..a0e2851 100644
+--- a/src/file.c
++++ b/src/file.c
+@@ -5,71 +5,38 @@
+ #include <fcntl.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+-#include <zip.h>
+ 
+ #include "oscompat.h"
+ #include "qdl.h"
+ #include "file.h"
+ 
+-struct qdl_zip {
+-	zip_t *zip;
+-	unsigned int refcount;
+-};
+-
+ int qdl_file_open(struct qdl_zip *qdl_zip, const char *filename, struct qdl_file *file)
+ {
+-	struct zip_stat st;
+-	zip_int64_t idx;
+-	zip_file_t *zf;
+ 	off_t len;
+-	zip_t *zip;
+ 	int fd;
+ 
+-	if (qdl_zip) {
+-		zip = qdl_zip->zip;
+-
+-		idx = zip_name_locate(zip, filename, 0);
+-		if (idx < 0) {
+-			ux_err("unable to locate \"%s\" in zip archive\n", filename);
+-			return -1;
+-		}
+-
+-		if (zip_stat_index(zip, idx, 0, &st) < 0) {
+-			ux_err("unable to stat \"%s\" in zip archive\n", filename);
+-			return -1;
+-		}
+-
+-		zf = zip_fopen_index(zip, idx, 0);
+-		if (!zf) {
+-			ux_err("unable to open \"%s\" in zip archive\n", filename);
+-			return -1;
+-		}
++	if (qdl_zip)
++		return qdl_zip_file_open(qdl_zip, filename, file);
+ 
+-		file->type = QDL_FILE_TYPE_ZIP;
+-		file->fd = -1;
+-		file->size = st.size;
+-		file->zip_file = zf;
+-	} else {
+-		fd = open(filename, O_RDONLY | O_BINARY);
+-		if (fd < 0) {
+-			ux_err("failed to open \"%s\" for reading\n", filename);
+-			return -1;
+-		}
++	fd = open(filename, O_RDONLY | O_BINARY);
++	if (fd < 0) {
++		ux_err("failed to open \"%s\" for reading\n", filename);
++		return -1;
++	}
+ 
+-		len = lseek(fd, 0, SEEK_END);
+-		if (len < 0) {
+-			ux_err("failed to find end of \"%s\"\n", filename);
+-			close(fd);
+-			return -1;
+-		}
++	len = lseek(fd, 0, SEEK_END);
++	if (len < 0) {
++		ux_err("failed to find end of \"%s\"\n", filename);
++		close(fd);
++		return -1;
++	}
+ 
+-		lseek(fd, 0, SEEK_SET);
++	lseek(fd, 0, SEEK_SET);
+ 
+-		file->type = QDL_FILE_TYPE_POSIX;
+-		file->fd = fd;
+-		file->size = len;
+-		file->zip_file = NULL;
+-	}
++	file->type = QDL_FILE_TYPE_POSIX;
++	file->fd = fd;
++	file->size = len;
++	file->zip_file = NULL;
+ 
+ 	return 0;
+ }
+@@ -97,7 +64,7 @@ void *qdl_file_load(struct qdl_file *file, size_t *len)
+ 		}
+ 		break;
+ 	case QDL_FILE_TYPE_ZIP:
+-		n = zip_fread(file->zip_file, buf, file->size);
++		n = qdl_zip_file_read(file, buf, file->size);
+ 		if ((size_t)n != file->size) {
+ 			ux_err("failed to load zip file member\n");
+ 			goto err_free_buf;
+@@ -124,8 +91,7 @@ void qdl_file_close(struct qdl_file *file)
+ 		file->fd = -1;
+ 		break;
+ 	case QDL_FILE_TYPE_ZIP:
+-		zip_fclose(file->zip_file);
+-		file->zip_file = NULL;
++		qdl_zip_file_close(file);
+ 		break;
+ 	};
+ 
+@@ -145,7 +111,7 @@ ssize_t qdl_file_read(struct qdl_file *file, void *buf, size_t len)
+ 	case QDL_FILE_TYPE_POSIX:
+ 		return read(file->fd, buf, len);
+ 	case QDL_FILE_TYPE_ZIP:
+-		return zip_fread(file->zip_file, buf, len);
++		return qdl_zip_file_read(file, buf, len);
+ 	};
+ 
+ 	return -1;
+@@ -197,45 +163,28 @@ off_t qdl_file_seek(struct qdl_file *file, off_t offset, int whence)
+ 	return -1;
+ }
+ 
++#ifndef HAVE_ZIP_CONTAINER
++/*
++ * Built without zip-container support: qdl_zip_open() reports "not a
++ * zip archive" for every input, so the plain contents.xml and
++ * flashmap.json flows work unchanged and no zip handle ever exists.
++ */
+ int qdl_zip_open(const char *filename, struct qdl_zip **__qdl_zip)
+ {
+-	struct qdl_zip *qdl_zip;
+-	zip_t *zip;
+-
+-	zip = zip_open(filename, ZIP_RDONLY, NULL);
+-	if (!zip) {
+-		*__qdl_zip = NULL;
+-		return 0;
+-	}
++	(void)filename;
+ 
+-	qdl_zip = calloc(1, sizeof(*qdl_zip));
+-	if (!qdl_zip) {
+-		zip_close(zip);
+-		return -1;
+-	}
+-
+-	qdl_zip->zip = zip;
+-	qdl_zip->refcount = 1;
+-
+-	*__qdl_zip = qdl_zip;
++	*__qdl_zip = NULL;
+ 
+ 	return 0;
+ }
+ 
+ struct qdl_zip *qdl_zip_get(struct qdl_zip *qdl_zip)
+ {
+-	if (qdl_zip)
+-		qdl_zip->refcount++;
+-
+ 	return qdl_zip;
+ }
+ 
+ void qdl_zip_put(struct qdl_zip *qdl_zip)
+ {
+-	if (qdl_zip) {
+-		if (--qdl_zip->refcount == 0) {
+-			zip_close(qdl_zip->zip);
+-			free(qdl_zip);
+-		}
+-	}
++	(void)qdl_zip;
+ }
++#endif
+diff --git a/src/file.h b/src/file.h
+index 5a17fbe..e1adeb2 100644
+--- a/src/file.h
++++ b/src/file.h
+@@ -5,6 +5,7 @@
+ #ifndef __QDL_FILE_H__
+ #define __QDL_FILE_H__
+ 
++#include <stdbool.h>
+ #include <sys/types.h>
+ 
+ struct zip_file;
+@@ -37,4 +38,50 @@ off_t qdl_file_seek(struct qdl_file *file, off_t offset, int whence);
+ int qdl_zip_open(const char *filename, struct qdl_zip **__qdl_zip);
+ struct qdl_zip *qdl_zip_get(struct qdl_zip *qzip);
+ void qdl_zip_put(struct qdl_zip *qzip);
++
++/*
++ * Internal libzip-backed helpers, implemented in file_zip.c. Builds
++ * without zip-container support get inert stubs; they are unreachable
++ * there, as qdl_zip_open() then never produces a zip handle and no
++ * qdl_file ever becomes QDL_FILE_TYPE_ZIP.
++ */
++#ifdef HAVE_ZIP_CONTAINER
++static inline bool qdl_zip_supported(void)
++{
++	return true;
++}
++
++int qdl_zip_file_open(struct qdl_zip *qzip, const char *filename, struct qdl_file *file);
++ssize_t qdl_zip_file_read(struct qdl_file *file, void *buf, size_t len);
++void qdl_zip_file_close(struct qdl_file *file);
++#else
++static inline bool qdl_zip_supported(void)
++{
++	return false;
++}
++
++static inline int qdl_zip_file_open(struct qdl_zip *qzip, const char *filename,
++				    struct qdl_file *file)
++{
++	(void)qzip;
++	(void)filename;
++	(void)file;
++
++	return -1;
++}
++
++static inline ssize_t qdl_zip_file_read(struct qdl_file *file, void *buf, size_t len)
++{
++	(void)file;
++	(void)buf;
++	(void)len;
++
++	return -1;
++}
++
++static inline void qdl_zip_file_close(struct qdl_file *file)
++{
++	(void)file;
++}
++#endif
+ #endif
+diff --git a/src/file_zip.c b/src/file_zip.c
+new file mode 100644
+index 0000000..6c80337
+--- /dev/null
++++ b/src/file_zip.c
+@@ -0,0 +1,102 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++#include <stdlib.h>
++#include <zip.h>
++
++#include "qdl.h"
++#include "file.h"
++
++struct qdl_zip {
++	zip_t *zip;
++	unsigned int refcount;
++};
++
++int qdl_zip_file_open(struct qdl_zip *qdl_zip, const char *filename,
++		      struct qdl_file *file)
++{
++	struct zip_stat st;
++	zip_int64_t idx;
++	zip_file_t *zf;
++	zip_t *zip = qdl_zip->zip;
++
++	idx = zip_name_locate(zip, filename, 0);
++	if (idx < 0) {
++		ux_err("unable to locate \"%s\" in zip archive\n", filename);
++		return -1;
++	}
++
++	if (zip_stat_index(zip, idx, 0, &st) < 0) {
++		ux_err("unable to stat \"%s\" in zip archive\n", filename);
++		return -1;
++	}
++
++	zf = zip_fopen_index(zip, idx, 0);
++	if (!zf) {
++		ux_err("unable to open \"%s\" in zip archive\n", filename);
++		return -1;
++	}
++
++	file->type = QDL_FILE_TYPE_ZIP;
++	file->fd = -1;
++	file->size = st.size;
++	file->zip_file = zf;
++
++	return 0;
++}
++
++ssize_t qdl_zip_file_read(struct qdl_file *file, void *buf, size_t len)
++{
++	return zip_fread(file->zip_file, buf, len);
++}
++
++void qdl_zip_file_close(struct qdl_file *file)
++{
++	zip_fclose(file->zip_file);
++	file->zip_file = NULL;
++}
++
++int qdl_zip_open(const char *filename, struct qdl_zip **__qdl_zip)
++{
++	struct qdl_zip *qdl_zip;
++	zip_t *zip;
++
++	zip = zip_open(filename, ZIP_RDONLY, NULL);
++	if (!zip) {
++		*__qdl_zip = NULL;
++		return 0;
++	}
++
++	qdl_zip = calloc(1, sizeof(*qdl_zip));
++	if (!qdl_zip) {
++		zip_close(zip);
++		return -1;
++	}
++
++	qdl_zip->zip = zip;
++	qdl_zip->refcount = 1;
++
++	*__qdl_zip = qdl_zip;
++
++	return 0;
++}
++
++struct qdl_zip *qdl_zip_get(struct qdl_zip *qdl_zip)
++{
++	if (qdl_zip)
++		qdl_zip->refcount++;
++
++	return qdl_zip;
++}
++
++void qdl_zip_put(struct qdl_zip *qdl_zip)
++{
++	if (!qdl_zip)
++		return;
++
++	if (--qdl_zip->refcount == 0) {
++		zip_close(qdl_zip->zip);
++		free(qdl_zip);
++	}
++}
+diff --git a/src/flashmap.h b/src/flashmap.h
+index 0352366..ccb8705 100644
+--- a/src/flashmap.h
++++ b/src/flashmap.h
+@@ -12,6 +12,24 @@ struct sahara_image;
+ 
+ int flashmap_load(struct list_head *ops, const char *filename, char *specifier,
+ 		  struct sahara_image *images, const char *incdir);
++
++/*
++ * Implemented in zipper.c, which is only built with zip-container
++ * support. The stub keeps callers linkable; they are expected to check
++ * qdl_zip_supported() and report the missing feature themselves.
++ */
++#ifdef HAVE_ZIP_CONTAINER
+ int zipper_write(const char *filename, struct list_head *ops, struct sahara_image *images);
++#else
++static inline int zipper_write(const char *filename, struct list_head *ops,
++			       struct sahara_image *images)
++{
++	(void)filename;
++	(void)ops;
++	(void)images;
++
++	return -1;
++}
++#endif
+ 
+ #endif
+diff --git a/src/meson.build b/src/meson.build
+index 2e88ab7..ec5c6e0 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -13,9 +13,15 @@ lib_sources = files(
+   'io.c', 'patch.c',
+   'program.c', 'read.c', 'sahara_config.c', 'sha2.c', 'sim.c', 'ufs.c', 'usb.c',
+   'vip.c', 'sparse.c', 'gpt.c', 'flashmap.c', 'json.c', 'contents.c', 'pathbuf.c',
+-  'zipper.c',
+ )
+ 
++# Zip container support: reading flash bundles (file_zip.c) and the
++# create-zip subcommand (zipper.c) both need libzip.
++if libzip_dep.found()
++  common_sources += files('file_zip.c')
++  lib_sources += files('zipper.c')
++endif
++
+ # qdl: the full flashing tool (shared sources plus the CLI front-end).
+ qdl_sources = lib_sources + files('qdl.c')
+ 
+diff --git a/src/qdl.c b/src/qdl.c
+index a36f9c7..ac5f323 100644
+--- a/src/qdl.c
++++ b/src/qdl.c
+@@ -828,6 +828,8 @@ static int qdl_cmd_flash(struct list_head *firehose_ops, const char *arg,
+ 		break;
+ 	default:
+ 		ux_err("flash input must be contents.xml, flashmap.json, or a zip containing flashmap.json\n");
++		if (!qdl_zip_supported())
++			ux_err("note: this qdl was built without zip-container support\n");
+ 		ret = -1;
+ 		break;
+ 	}
+@@ -865,6 +867,11 @@ static int qdl_create_zip(int argc, char **argv)
+ 
+ 	ux_init();
+ 
++	if (!qdl_zip_supported()) {
++		ux_err("create-zip requires zip-container support, which this qdl was built without\n");
++		return 1;
++	}
++
+ 	filename = qdl_split_specifier(argv[2], &specifier);
+ 	if (!filename) {
+ 		ux_err("failed to parse flash argument");
+-- 
+2.53.0
+

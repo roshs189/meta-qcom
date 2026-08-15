@@ -7,8 +7,13 @@ require conf/machine/include/qcom-common.inc
 DEFAULTTUNE = "armv8-6a-crypto"
 require conf/machine/include/arm/arch-armv8-6a.inc
 
+# The secure TPM device is not yet available on Glymur, so avoid
+# systemd's boot-time wait for /dev/tpm0.
+KERNEL_CMDLINE_EXTRA:append = " systemd.tpm2_wait=false"
+
 MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS += " \
     packagegroup-qcom-boot-essential \
+    packagegroup-machine-essential-qcom-glymur-soc \
 "
 
 MACHINE_EXTRA_RRECOMMENDS += " \

@@ -2,7 +2,7 @@ SUMMARY = "Prebuilt Qualcomm sensors libraries and test applications"
 DESCRIPTION = "Prebuilt core binaries required for sensor enablement and hardware \
 sensor data access. These prebuilt binaries also include test applications to \
 validate sensor services functionality through the Sensinghub Interface."
-LICENSE = "LICENSE.qcom-2"
+LICENSE = "LicenseRef-LICENSE.qcom-2"
 LIC_FILES_CHKSUM = "file://LICENSE.qcom-2;md5=f33ba334514c4dfabc6ab7377babb377"
 
 PBT_BUILD_DATE = "260514.1"
@@ -11,7 +11,7 @@ SRC_URI[sha256sum] = "507652592b326bfeb1b31c4c37f61a5173439bd3dffa7ded72b675f834
 
 S = "${UNPACKDIR}"
 
-DEPENDS = "glib-2.0 protobuf-camx sensinghub qmi-framework libdiag fastrpc"
+DEPENDS = "glib-2.0 protobuf sensinghub qmi-framework libdiag fastrpc"
 
 inherit systemd
 
