@@ -18,13 +18,13 @@ KERNEL_PAHOLE ?= '${@oe.utils.vartrue("DEBUG_BUILD", bb.utils.contains("BBFILE_C
 do_configure[depends] += '${@oe.utils.vartrue("KERNEL_PAHOLE", "pahole-native:do_populate_sysroot", "", d)}'
 EXTRA_OEMAKE += '${@oe.utils.vartrue("KERNEL_PAHOLE", "", "PAHOLE=false", d)}'
 
-# tag: qcom-next-7.2-rc3-20260731
-SRCREV ?= "8d5dbc1b17adf8fe86a41adcda686785e73f5414"
+# https://github.com/qualcomm-linux/kernel/pull/964 (nord_pmic_adc_channels)
+SRCREV ?= "921efe268ab7cad765ed1c81da464d0487b285c8"
 
-SRCBRANCH ?= "nobranch=1"
+SRCBRANCH ?= "branch=nord_pmic_adc_channels"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
 
-SRC_URI = "git://github.com/qualcomm-linux/kernel.git;${SRCBRANCH};protocol=https"
+SRC_URI = "git://github.com/drajpura269/kernel-nord.git;${SRCBRANCH};protocol=https"
 
 # Additional kernel configs.
 SRC_URI += " \
