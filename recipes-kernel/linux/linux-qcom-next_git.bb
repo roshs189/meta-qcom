@@ -18,13 +18,13 @@ KERNEL_PAHOLE ?= '${@oe.utils.vartrue("DEBUG_BUILD", bb.utils.contains("BBFILE_C
 do_configure[depends] += '${@oe.utils.vartrue("KERNEL_PAHOLE", "pahole-native:do_populate_sysroot", "", d)}'
 EXTRA_OEMAKE += '${@oe.utils.vartrue("KERNEL_PAHOLE", "", "PAHOLE=false", d)}'
 
-# https://github.com/qualcomm-linux/kernel/pull/964 (nord_pmic_adc_channels)
-SRCREV ?= "921efe268ab7cad765ed1c81da464d0487b285c8"
+# https://github.com/qualcomm-linux/kernel/pull/968 (Add Coresight nodes for Nord)
+SRCREV ?= "e4786033a93d5cf971a05e11d8046647f740708b"
 
-SRCBRANCH ?= "branch=nord_pmic_adc_channels"
+SRCBRANCH ?= "branch=staging/nord"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
 
-SRC_URI = "git://github.com/drajpura269/kernel-nord.git;${SRCBRANCH};protocol=https"
+SRC_URI = "git://github.com/jiegan0107/qcom-next.git;${SRCBRANCH};protocol=https"
 
 # Additional kernel configs.
 SRC_URI += " \
