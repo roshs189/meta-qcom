@@ -18,13 +18,13 @@ KERNEL_PAHOLE ?= '${@oe.utils.vartrue("DEBUG_BUILD", bb.utils.contains("BBFILE_C
 do_configure[depends] += '${@oe.utils.vartrue("KERNEL_PAHOLE", "pahole-native:do_populate_sysroot", "", d)}'
 EXTRA_OEMAKE += '${@oe.utils.vartrue("KERNEL_PAHOLE", "", "PAHOLE=false", d)}'
 
-# https://github.com/qualcomm-linux/kernel/pull/968 (Add Coresight nodes for Nord)
-SRCREV ?= "e4786033a93d5cf971a05e11d8046647f740708b"
+# https://github.com/wasimn-qc/kernel/pull/1 (IQ10/Ride NORD kernel bringup: M0 milestone report)
+SRCREV ?= "a62d8ac16d5d4ba02ac5fc67d9904bcb3c6a7dec"
 
-SRCBRANCH ?= "branch=staging/nord"
+SRCBRANCH ?= "branch=qcom-linux-staging_k-genesis"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
 
-SRC_URI = "git://github.com/jiegan0107/qcom-next.git;${SRCBRANCH};protocol=https"
+SRC_URI = "git://github.com/wasimn-qc/kernel.git;${SRCBRANCH};protocol=https"
 
 # Additional kernel configs.
 SRC_URI += " \
