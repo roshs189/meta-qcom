@@ -10,26 +10,36 @@ COMPATIBLE_MACHINE = "(qcom)"
 
 LINUX_QCOM_FIT_DTB_COMPATIBLE = "conf/machine/include/fit-dtb-compatible-linux-qcom.inc"
 
-LINUX_VERSION ?= "7.1+7.2-rc3"
+LINUX_VERSION ?= "7.1"
+
+# For Nord, switch to temp enablement branch
+LINUX_VERSION:nord = "7.1+7.2-rc3+nord"
+
+# The nord version string (7.1+...) sorts below a previously-built 7.2+git
+# in this TMPDIR, tripping the version-going-backwards QA check. Bump the
+# package epoch for nord so it always sorts forward despite the scheme change.
+PE:nord = "1"
 
 PV = "${LINUX_VERSION}+git"
 
-KERNEL_PAHOLE ?= '${@oe.utils.vartrue("DEBUG_BUILD", bb.utils.contains("BBFILE_COLLECTIONS", "openembedded-layer", "1", "0", d), "0", d)}'
-do_configure[depends] += '${@oe.utils.vartrue("KERNEL_PAHOLE", "pahole-native:do_populate_sysroot", "", d)}'
-EXTRA_OEMAKE += '${@oe.utils.vartrue("KERNEL_PAHOLE", "", "PAHOLE=false", d)}'
+# tag: nord-staging-qcom-next-7.2-rc3-20260812
+SRCREV ?= "17e12febe320bf65431ca3d78f52d58df3d4b0fb"
 
-# https://github.com/wasimn-qc/kernel/pull/1 (IQ10/Ride NORD kernel bringup: M0 milestone report)
-SRCREV ?= "a62d8ac16d5d4ba02ac5fc67d9904bcb3c6a7dec"
-
-SRCBRANCH ?= "branch=qcom-linux-staging_k-genesis"
+SRCBRANCH ?= "nobranch=1"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
+SRCBRANCH:nord = "branch=staging/nord"
 
-SRC_URI = "git://github.com/wasimn-qc/kernel.git;${SRCBRANCH};protocol=https"
+SRC_URI = "git://github.com/qualcomm-linux/kernel.git;${SRCBRANCH};protocol=https"
 
 # Additional kernel configs.
 SRC_URI += " \
     file://configs/bsp-additions.cfg \
+    file://0001-PENDING-arm64-dts-qcom-talos-evk-add-QPS615-m.2-ethe.patch \
 "
+
+# The QPS615 m.2 ethernet change already landed in the staging/nord base
+# (7.2-rc3), so the PENDING backport reverse-applies there. Drop it for nord.
+SRC_URI:remove:nord = "file://0001-PENDING-arm64-dts-qcom-talos-evk-add-QPS615-m.2-ethe.patch"
 
 # To build tip of qcom-next branch set preferred
 # virtual/kernel provider to 'linux-qcom-next-upstream'
