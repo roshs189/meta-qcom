@@ -18,13 +18,13 @@ KERNEL_PAHOLE ?= '${@oe.utils.vartrue("DEBUG_BUILD", bb.utils.contains("BBFILE_C
 do_configure[depends] += '${@oe.utils.vartrue("KERNEL_PAHOLE", "pahole-native:do_populate_sysroot", "", d)}'
 EXTRA_OEMAKE += '${@oe.utils.vartrue("KERNEL_PAHOLE", "", "PAHOLE=false", d)}'
 
-# iq10-rrd (nord): wasimn-qc/kernel#5, qcom-linux-staging-0510b93a
-SRCREV ?= "da3014f8d3622af3ab02d019f10a24ee4dea3329"
+# iq10-rrd (nord): TEMPORARY tier-3 fallback qualcomm-linux/kernel@staging/nord
+SRCREV ?= "5e135c4f50fa80d00226bfc0c39e8f823f0c6b3c"
 
-SRCBRANCH ?= "branch=qcom-linux-staging-0510b93a"
+SRCBRANCH ?= "branch=staging/nord"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
 
-SRC_URI = "git://github.com/wasimn-qc/kernel.git;${SRCBRANCH};protocol=https"
+SRC_URI = "git://github.com/qualcomm-linux/kernel.git;${SRCBRANCH};protocol=https"
 
 # Additional kernel configs.
 SRC_URI += " \
