@@ -249,5 +249,5 @@ FIT_DTB_COMPATIBLE[qcom_glymur-crd-staging] = "glymur-crd glymur-staging"
 FIT_DTB_COMPATIBLE[qcom_glymur-crd-camx] = "glymur-crd glymur-crd-camx"
 
 # ---------- nord ----------
-FIT_DTB_COMPATIBLE[qcom_qam8x97p-qam] = "nord-ride"
+FIT_DTB_COMPATIBLE[qcom_qam8x97p-qam] = "nord-ride-sx"
 FIT_DTB_COMPATIBLE[qcom_nord-qam] = "nord-rrd"
