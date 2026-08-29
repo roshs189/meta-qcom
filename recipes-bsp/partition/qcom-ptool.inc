@@ -3,7 +3,7 @@ LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=b0a8acd90d872086b279ead88af03369"
 
 SRC_URI = "git://github.com/roshs189/qcom-ptool.git;protocol=https;nobranch=1"
-SRCREV = "95db71b79dcbd44ad51998bfddb48add489a1965"
+SRCREV = "3c8f5b02434bbd81d236c50ebe96c59e35186e75"
 
 # The pinned qcom-ptool source ships a pyproject.toml that declares the
 # [tool.pytest.ini_options] table twice, which is invalid TOML and makes
