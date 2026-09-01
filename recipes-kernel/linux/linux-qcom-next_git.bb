@@ -19,7 +19,7 @@ do_configure[depends] += '${@oe.utils.vartrue("KERNEL_PAHOLE", "pahole-native:do
 EXTRA_OEMAKE += '${@oe.utils.vartrue("KERNEL_PAHOLE", "", "PAHOLE=false", d)}'
 
 # iq10-rrd (nord): TEMPORARY tier-3 fallback qualcomm-linux/kernel@staging/nord
-SRCREV ?= "75c0ae67fdac0b08e54ed11dfa0fc375f04c680f"
+SRCREV ?= "dff43e423d0c149bdc0adcde4fc007bd7af81b17"
 
 SRCBRANCH ?= "branch=staging/nord"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
