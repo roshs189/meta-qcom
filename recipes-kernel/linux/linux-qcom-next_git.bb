@@ -18,10 +18,10 @@ KERNEL_PAHOLE ?= '${@oe.utils.vartrue("DEBUG_BUILD", bb.utils.contains("BBFILE_C
 do_configure[depends] += '${@oe.utils.vartrue("KERNEL_PAHOLE", "pahole-native:do_populate_sysroot", "", d)}'
 EXTRA_OEMAKE += '${@oe.utils.vartrue("KERNEL_PAHOLE", "", "PAHOLE=false", d)}'
 
-# tag: qcom-next-7.2-rc3-20260731
-SRCREV ?= "8d5dbc1b17adf8fe86a41adcda686785e73f5414"
+# iq10-rrd (nord): TEMPORARY tier-3 fallback qualcomm-linux/kernel@staging/nord
+SRCREV ?= "dff43e423d0c149bdc0adcde4fc007bd7af81b17"
 
-SRCBRANCH ?= "nobranch=1"
+SRCBRANCH ?= "branch=staging/nord"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
 
 SRC_URI = "git://github.com/qualcomm-linux/kernel.git;${SRCBRANCH};protocol=https"
