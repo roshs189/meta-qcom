@@ -1,4 +1,9 @@
 require firmware-qcom-boot-nord.inc
 
-SRC_URI[bootbinaries.sha256sum]           = "b1d065a274fc39bfa62cf32438311b7694d7283c08b2150784741e63d2923794"
-SRC_URI[bootbinaries_immutable.sha256sum] = "e151532073147aeeae540745d2d0e1f311a37647c099d3488099d9a9508e1441"
+# SINGLE-ZIP FORM: one SRC_URI (name=bootbinaries), no immutable companion.
+#
+# sha256 computed LIVE (§4a) from the fetched single Nord_bootbinaries.zip
+# (artifactory-np.qualcomm.com, 30203177 bytes). This is the real checksum of the
+# new single bundle — NOT the stale old two-zip plain-bundle value. If the bundle
+# is ever re-published, qcom-yocto-build-heal recomputes this live and wins.
+SRC_URI[bootbinaries.sha256sum] = "39a5e9d4047654a0bad8f79014cee1533754817cfae65214e4d2927aa1d14c13"

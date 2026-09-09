@@ -1,42 +1,32 @@
 DESCRIPTION = "QCOM NHLOS Firmware for Qualcomm Nord platform"
 LICENSE = "LicenseRef-LICENSE.qcom-2"
-LIC_FILES_CHKSUM = "file://${UNPACKDIR}/${BOOTBINARIES}/LICENSE.qcom-2;md5=165287851294f2fb8ac8cbc5e24b02b0"
+# §4a live-bundle-wins: the single Nord_bootbinaries.zip ships no LICENSE.qcom-2 —
+# it carries license.bin (md5 computed live from the fetched zip). The pinned
+# LICENSE.qcom-2/165287… guess was from the OLD two-zip bundle and would point at
+# a nonexistent file. LICENSE identifier below stays LicenseRef-LICENSE.qcom-2
+# (covered by INCOMPATIBLE_LICENSE_EXCEPTIONS); only the checksum file/md5 change.
+LIC_FILES_CHKSUM = "file://${UNPACKDIR}/${BOOTBINARIES}/license.bin;md5=675a095e5cf03c58c6c812b32cec6b9d"
 
-# Nexus release dir (no scheme, no .zip) — mirrors the spec's
-# firmware_boot.fw_artifactory. Both zip basenames are reconstructed from
-# ${BOOTBINARIES}/${PV} below.
-FW_ARTIFACTORY = "softwarecenter.qualcomm.com/nexus/generic/product/chip/tech-package/Nord_bootbinaries.1.0/nord_bootbinaries.1.0-test-device-public"
-BOOTBINARIES = "NORD_bootbinaries"
+# Single literal .zip from artifactory-np — mirrors the spec's
+# firmware_boot.fw_artifactory (scheme + .zip suffix). Per SKILL.md Section 4's
+# `case "$FW" in *.zip)` branch this URL is used VERBATIM as the SRC_URI; no
+# basename is reconstructed from ${BOOTBINARIES}/${PV}. BOOTBINARIES still names
+# the internal unpack dir (Nord_bootbinaries/, drives S / LIC_FILES_CHKSUM /
+# do_deploy); PV is recipe-version bookkeeping only (firmware-qcom-boot-nord_00002.bb).
+# No immutable companion in single-zip form, so a single SRC_URI, no
+# do_deploy:append. NOTE: the prior two-zip bundle's immutable companion carried
+# 13 boot binaries deployed into this same nord/ subdir — the single zip must
+# contain all of them or the flat build loses them silently (spec firmware_boot.notes).
+# §4a live-bundle-wins: the single Nord_bootbinaries.zip unpacks to a top-level
+# dir "Nord_bootbinaries/" (capital N only) — NOT the all-caps NORD_bootbinaries
+# the old two-zip bundle used. On case-sensitive Linux S must match the real dir
+# or do_unpack/S resolves to a nonexistent path and deploy ships nothing.
+BOOTBINARIES = "Nord_bootbinaries"
 
-# Two zips under the single versioned dir: plain (unpacks to
-# NORD_bootbinaries/, drives S / LIC_FILES_CHKSUM / base do_deploy) and the
-# immutable companion (unpacks to NORD_bootbinaries_immutable/, deployed by the
-# do_deploy:append() below). See the spec firmware_boot.notes.
 SRC_URI = " \
-    https://${FW_ARTIFACTORY}/${PV}/${BOOTBINARIES}_${PV}.zip;name=bootbinaries \
-    https://${FW_ARTIFACTORY}/${PV}/${BOOTBINARIES}_immutable_${PV}.zip;name=bootbinaries_immutable \
+    https://artifactory-np.qualcomm.com:443/artifactory/lecoreqipl-oracle-rpm-hyd-fed/0001/Nord_bootbinaries.zip;name=bootbinaries \
     "
 
 QCOM_BOOT_IMG_SUBDIR = "nord"
 
 include firmware-qcom-boot-common.inc
-
-# Deploy the immutable companion set into the SAME ${QCOM_BOOT_IMG_SUBDIR}.
-# The immutable set is 13 arbitrary boot binaries (not a fixed manifest), so we
-# reuse the plain zip's extension-glob set verbatim and strip gpt_*/zeros_* just
-# like the base do_deploy(). Plain vs immutable are disjoint except LICENSE.qcom-2
-# and Readme.txt (neither globbed), so no deploy overwrite occurs.
-do_deploy:append() {
-    IMMUT="${UNPACKDIR}/${BOOTBINARIES}_immutable"
-    if [ -d "${IMMUT}" ]; then
-        install -d ${DEPLOYDIR}/${QCOM_BOOT_IMG_SUBDIR}
-        find "${IMMUT}" -maxdepth 1 -name 'gpt_*.bin'   -delete
-        find "${IMMUT}" -maxdepth 1 -name 'zeros_*.bin' -delete
-        for ext in bin elf fv lzma mbn melf xz; do
-            find "${IMMUT}" -maxdepth 1 -name "*.${ext}" \
-                -exec install -m 0644 {} ${DEPLOYDIR}/${QCOM_BOOT_IMG_SUBDIR} \;
-        done
-        find "${IMMUT}" -maxdepth 1 -name 'qsahara_*.xml' \
-            -exec install -m 0644 {} ${DEPLOYDIR}/${QCOM_BOOT_IMG_SUBDIR} \;
-    fi
-}
