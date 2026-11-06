@@ -1,0 +1,206 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
+Date: Sun, 15 Nov 2026 23:53:57 +0530
+Subject: [OE-core][PATCH] uboot-sign: add UBOOT_FIT_CONFIGURATIONS
+
+The U-Boot FIT only ever has the one configuration. An SPL that loads
+its images in stages, such as one loading firmware from a "pre-ddr"
+configuration ahead of DDR init and the rest from a "post-ddr" one,
+cannot get the other configurations into it, short of writing them as
+ITS text along with their signature nodes.
+
+Add UBOOT_FIT_CONFIGURATIONS, a list of configuration node names written
+after the default configuration, each described by
+UBOOT_FIT_CONFIGURATION_LOADABLES, _FIRMWARE and _DESC varflags named
+after the node. Write every configuration, the default one included,
+from uboot_fitimage_configuration, so that they are all signed alike.
+
+Assisted-by: Claude Code:claude-opus-5-5
+Signed-off-by: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ meta/classes-recipe/uboot-sign.bbclass | 140 +++++++++++++++++++------
+ 1 file changed, 107 insertions(+), 33 deletions(-)
+
+diff --git a/meta/classes-recipe/uboot-sign.bbclass b/meta/classes-recipe/uboot-sign.bbclass
+index 7a84d12cb3..46349a2a0d 100644
+--- a/meta/classes-recipe/uboot-sign.bbclass
++++ b/meta/classes-recipe/uboot-sign.bbclass
+@@ -144,6 +144,18 @@ UBOOT_FIT_CONF_USER_LOADABLES ?= ''
+ # as a space separated list of node names
+ UBOOT_FIT_CONF_LOADABLES ?= ""
+ 
++# Additional configurations for the U-Boot fitImage, written after the
++# default one, as a space separated list of configuration node names. Each
++# one is described by varflags named after its node:
++#   UBOOT_FIT_CONFIGURATION_LOADABLES[name]  images it loads, as a space
++#                                            separated list of image node
++#                                            names (required)
++#   UBOOT_FIT_CONFIGURATION_FIRMWARE[name]   image to boot first, if any
++#   UBOOT_FIT_CONFIGURATION_DESC[name]       description, the node name if
++#                                            not set
++# They are signed like the default configuration.
++UBOOT_FIT_CONFIGURATIONS ?= ""
++
+ UBOOT_FIT_UBOOT_LOADADDRESS ?= "${UBOOT_LOADADDRESS}"
+ UBOOT_FIT_UBOOT_ENTRYPOINT ?= "${UBOOT_ENTRYPOINT}"
+ 
+@@ -474,17 +486,105 @@ def uboot_fitimage_user_images(d):
+         cmds.append('uboot_fitimage_user_image ' + ' '.join(shlex.quote(a) for a in args))
+     return '\n'.join(cmds)
+ 
+-# The calls to uboot_fitimage_user_image only appear once the image list is
++# Create a ITS configuration node, given its name, description, firmware,
++# loadables and fdt image, signed as SPL_SIGN_CONF asks for it
++uboot_fitimage_configuration() {
++	conf_firmware=""
++	conf_fdt=""
++	conf_sign_images="\"loadables\""
++
++	if [ -n "$3" ] ; then
++		conf_firmware="firmware = \"$3\";"
++		conf_sign_images="\"firmware\", ${conf_sign_images}"
++	fi
++
++	if [ -n "$5" ] ; then
++		conf_fdt="fdt = \"$5\";"
++		conf_sign_images="${conf_sign_images}, \"fdt\""
++	fi
++
++	cat << EOF >> ${UBOOT_ITS}
++        $1 {
++            description = "$2";
++            ${conf_firmware}
++            loadables = $4;
++            ${conf_fdt}
++EOF
++
++	if [ "${SPL_SIGN_ENABLE}" = "1" ] && [ "${SPL_SIGN_CONF}" = "1" ] ; then
++		cat << EOF >> ${UBOOT_ITS}
++            signature {
++                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
++                key-name-hint = "${SPL_SIGN_KEYNAME}";
++                sign-images = ${conf_sign_images};
++            };
++EOF
++	fi
++
++	cat << EOF >> ${UBOOT_ITS}
++        };
++EOF
++}
++
++# Create a ITS configuration node for a configuration from
++# UBOOT_FIT_CONFIGURATIONS, given its name, description, firmware and
++# loadables
++uboot_fitimage_user_configuration() {
++	images="uboot fdt ${UBOOT_FIT_IMAGES}"
++	if [ "${UBOOT_FIT_TEE}" = "1" ] ; then
++		images="$images tee"
++	fi
++	if [ "${UBOOT_FIT_ARM_TRUSTED_FIRMWARE}" = "1" ] ; then
++		images="$images atf"
++	fi
++
++	if [ -z "$4" ] ; then
++		bbfatal "UBOOT_FIT_CONFIGURATIONS: $1 needs UBOOT_FIT_CONFIGURATION_LOADABLES[$1]"
++	fi
++
++	loadables=""
++	for image in $3 $4 ; do
++		case " $images " in
++		*" $image "*)
++			;;
++		*)
++			bbfatal "UBOOT_FIT_CONFIGURATIONS: $1 has no $image image to load"
++			;;
++		esac
++	done
++	for image in $4 ; do
++		loadables="${loadables}${loadables:+, }\"$image\""
++	done
++
++	uboot_fitimage_configuration "$1" "$2" "$3" "$loadables" ""
++}
++
++# The uboot_fitimage_user_configuration calls for UBOOT_FIT_CONFIGURATIONS
++def uboot_fitimage_user_configurations(d):
++    import shlex
++    cmds = []
++    for name in (d.getVar('UBOOT_FIT_CONFIGURATIONS') or '').split():
++        args = [name,
++                d.getVarFlag('UBOOT_FIT_CONFIGURATION_DESC', name) or name,
++                d.getVarFlag('UBOOT_FIT_CONFIGURATION_FIRMWARE', name) or '',
++                ' '.join((d.getVarFlag('UBOOT_FIT_CONFIGURATION_LOADABLES', name) or '').split())]
++        cmds.append('uboot_fitimage_user_configuration ' + ' '.join(shlex.quote(a) for a in args))
++    return '\n'.join(cmds)
++
++# The calls to uboot_fitimage_user_image and
++# uboot_fitimage_user_configuration only appear once the lists are
+ # expanded, and the varflags are read through a name
+ uboot_fitimage_assemble[vardeps] += "uboot_fitimage_user_image \
++    uboot_fitimage_user_configuration \
+     UBOOT_FIT_IMAGE_FILE UBOOT_FIT_IMAGE_LOAD UBOOT_FIT_IMAGE_ENTRY \
+-    UBOOT_FIT_IMAGE_TYPE UBOOT_FIT_IMAGE_ARCH UBOOT_FIT_IMAGE_OS UBOOT_FIT_IMAGE_DESC"
++    UBOOT_FIT_IMAGE_TYPE UBOOT_FIT_IMAGE_ARCH UBOOT_FIT_IMAGE_OS UBOOT_FIT_IMAGE_DESC \
++    UBOOT_FIT_CONFIGURATION_LOADABLES UBOOT_FIT_CONFIGURATION_FIRMWARE \
++    UBOOT_FIT_CONFIGURATION_DESC"
+ 
+ # Create a ITS file for the U-boot FIT, for use when
+ # we want to sign it so that the SPL can verify it
+ uboot_fitimage_assemble() {
+ 	conf_loadables="\"uboot\""
+-	conf_firmware=""
+ 	rm -f ${UBOOT_ITS} ${UBOOT_FITIMAGE_BINARY}
+ 
+ 	# First we create the ITS script
+@@ -558,45 +658,19 @@ EOF
+ 		esac
+ 	done
+ 
+-	conf_sign_images=""
+-	conf_sign_images_sep=""
+-
+-	if [ -n "${UBOOT_FIT_CONF_FIRMWARE}" ] ; then
+-		conf_firmware="firmware = \"${UBOOT_FIT_CONF_FIRMWARE}\";"
+-		conf_sign_images="${conf_sign_images}${conf_sign_images_sep}\"firmware\""
+-		conf_sign_images_sep=", "
+-	fi
+-
+-	if [ -n "${conf_loadables}" ] ; then
+-		conf_sign_images="${conf_sign_images}${conf_sign_images_sep}\"loadables\""
+-		conf_sign_images_sep=", "
+-	fi
+-	conf_sign_images="${conf_sign_images}${conf_sign_images_sep}\"fdt\""
+-
+ 	cat << EOF >> ${UBOOT_ITS}
+     };
+ 
+     configurations {
+         default = "conf";
+-        conf {
+-            description = "${UBOOT_FIT_CONF_DESC}";
+-            ${conf_firmware}
+-            loadables = ${conf_loadables};
+-            fdt = "fdt";
+ EOF
+ 
+-	if [ "${SPL_SIGN_ENABLE}" = "1" ] && [ "${SPL_SIGN_CONF}" = "1" ] ; then
+-		cat << EOF >> ${UBOOT_ITS}
+-            signature {
+-                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+-                key-name-hint = "${SPL_SIGN_KEYNAME}";
+-                sign-images = ${conf_sign_images};
+-            };
+-EOF
+-	fi
++	uboot_fitimage_configuration "conf" "${UBOOT_FIT_CONF_DESC}" \
++		"${UBOOT_FIT_CONF_FIRMWARE}" "${conf_loadables}" "fdt"
++
++	${@uboot_fitimage_user_configurations(d)}
+ 
+ 	cat << EOF >> ${UBOOT_ITS}
+-        };
+     };
+ };
+ EOF

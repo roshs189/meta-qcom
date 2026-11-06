@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
+Date: Sun, 15 Nov 2026 23:52:56 +0530
+Subject: [OE-core][PATCH] uboot-sign: add UBOOT_FIT_IMAGES
+
+A machine adding firmware images to the U-Boot FIT has to write their
+nodes itself, as ITS text in UBOOT_FIT_USER_SETTINGS, together with the
+hash and signature nodes the class would give them. Those copies of the
+signing logic go stale: they miss SPL_SIGN_INDIVIDUAL, or keep their
+hash nodes when signing is off.
+
+Add UBOOT_FIT_IMAGES, a list of image node names, each described by
+UBOOT_FIT_IMAGE_FILE, _LOAD, _ENTRY, _TYPE, _ARCH, _OS and _DESC
+varflags named after the node, and UBOOT_FIT_CONF_LOADABLES to load
+them from the configuration. The class writes their nodes like its own,
+hash and signature nodes included.
+
+The varflags are read as the task runs, so a prefunc can still set
+addresses only known once a dependency has deployed.
+
+Assisted-by: Claude Code:claude-opus-5-5
+Signed-off-by: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ meta/classes-recipe/uboot-sign.bbclass | 85 ++++++++++++++++++++++++++
+ 1 file changed, 85 insertions(+)
+
+diff --git a/meta/classes-recipe/uboot-sign.bbclass b/meta/classes-recipe/uboot-sign.bbclass
+index 5bd6d1418a..7a84d12cb3 100644
+--- a/meta/classes-recipe/uboot-sign.bbclass
++++ b/meta/classes-recipe/uboot-sign.bbclass
+@@ -116,6 +116,19 @@ UBOOT_FIT_TEE_IMAGE ?= "tee-raw.bin"
+ # User specific settings
+ UBOOT_FIT_USER_SETTINGS ?= ""
+ 
++# Additional images for the U-Boot fitImage, as a space separated list of
++# image node names. Each one is described by varflags named after its node:
++#   UBOOT_FIT_IMAGE_FILE[name]   image file, absolute or relative to the
++#                                U-Boot build directory (required)
++#   UBOOT_FIT_IMAGE_LOAD[name]   load address (required)
++#   UBOOT_FIT_IMAGE_ENTRY[name]  entry point, if the image has one
++#   UBOOT_FIT_IMAGE_TYPE[name]   image type, "firmware" if not set
++#   UBOOT_FIT_IMAGE_ARCH[name]   architecture, ${UBOOT_ARCH} if not set
++#   UBOOT_FIT_IMAGE_OS[name]     operating system, if any
++#   UBOOT_FIT_IMAGE_DESC[name]   description, the node name if not set
++# The nodes get the same hash and signature nodes as the class's own.
++UBOOT_FIT_IMAGES ?= ""
++
+ # U-Boot fitImage configuration description
+ UBOOT_FIT_CONF_DESC ?= "Boot with signed U-Boot FIT"
+ 
+@@ -127,6 +140,10 @@ UBOOT_FIT_CONF_FIRMWARE ?= ""
+ # It is a comma-separated list of strings.
+ UBOOT_FIT_CONF_USER_LOADABLES ?= ''
+ 
++# Images from UBOOT_FIT_IMAGES loaded by the configuration, after its own,
++# as a space separated list of node names
++UBOOT_FIT_CONF_LOADABLES ?= ""
++
+ UBOOT_FIT_UBOOT_LOADADDRESS ?= "${UBOOT_LOADADDRESS}"
+ UBOOT_FIT_UBOOT_ENTRYPOINT ?= "${UBOOT_ENTRYPOINT}"
+ 
+@@ -408,6 +425,61 @@ EOF
+ EOF
+ }
+ 
++# Create a ITS image node for an image from UBOOT_FIT_IMAGES, given its
++# name, file, load address, entry point, type, arch, os and description
++uboot_fitimage_user_image() {
++	if [ -z "$2" ] || [ -z "$3" ] ; then
++		bbfatal "UBOOT_FIT_IMAGES: $1 needs UBOOT_FIT_IMAGE_FILE[$1] and UBOOT_FIT_IMAGE_LOAD[$1]"
++	fi
++
++	cat << EOF >> ${UBOOT_ITS}
++        $1 {
++            description = "$8";
++            data = /incbin/("$2");
++            type = "$5";
++            arch = "$6";
++EOF
++	if [ -n "$7" ] ; then
++		echo "            os = \"$7\";" >> ${UBOOT_ITS}
++	fi
++	echo "            load = <$3>;" >> ${UBOOT_ITS}
++	if [ -n "$4" ] ; then
++		echo "            entry = <$4>;" >> ${UBOOT_ITS}
++	fi
++	echo "            compression = \"none\";" >> ${UBOOT_ITS}
++
++	uboot_fitimage_image_signing
++
++	cat << EOF >> ${UBOOT_ITS}
++        };
++EOF
++}
++
++# The uboot_fitimage_user_image calls for UBOOT_FIT_IMAGES. The varflags are
++# read as the task runs, so that a prefunc can still set them.
++def uboot_fitimage_user_images(d):
++    import shlex
++    cmds = []
++    for name in (d.getVar('UBOOT_FIT_IMAGES') or '').split():
++        def flag(var, default=''):
++            return d.getVarFlag(var, name) or default
++        args = [name,
++                flag('UBOOT_FIT_IMAGE_FILE'),
++                flag('UBOOT_FIT_IMAGE_LOAD'),
++                flag('UBOOT_FIT_IMAGE_ENTRY'),
++                flag('UBOOT_FIT_IMAGE_TYPE', 'firmware'),
++                flag('UBOOT_FIT_IMAGE_ARCH', d.getVar('UBOOT_ARCH')),
++                flag('UBOOT_FIT_IMAGE_OS'),
++                flag('UBOOT_FIT_IMAGE_DESC', name)]
++        cmds.append('uboot_fitimage_user_image ' + ' '.join(shlex.quote(a) for a in args))
++    return '\n'.join(cmds)
++
++# The calls to uboot_fitimage_user_image only appear once the image list is
++# expanded, and the varflags are read through a name
++uboot_fitimage_assemble[vardeps] += "uboot_fitimage_user_image \
++    UBOOT_FIT_IMAGE_FILE UBOOT_FIT_IMAGE_LOAD UBOOT_FIT_IMAGE_ENTRY \
++    UBOOT_FIT_IMAGE_TYPE UBOOT_FIT_IMAGE_ARCH UBOOT_FIT_IMAGE_OS UBOOT_FIT_IMAGE_DESC"
++
+ # Create a ITS file for the U-boot FIT, for use when
+ # we want to sign it so that the SPL can verify it
+ uboot_fitimage_assemble() {
+@@ -469,10 +541,23 @@ EOF
+ 		printf "%b" "${UBOOT_FIT_USER_SETTINGS}" >> ${UBOOT_ITS}
+ 	fi
+ 
++	${@uboot_fitimage_user_images(d)}
++
+ 	if [ -n "${UBOOT_FIT_CONF_USER_LOADABLES}" ] ; then
+ 		conf_loadables="${conf_loadables}${UBOOT_FIT_CONF_USER_LOADABLES}"
+ 	fi
+ 
++	for image in ${UBOOT_FIT_CONF_LOADABLES} ; do
++		case " ${UBOOT_FIT_IMAGES} " in
++		*" $image "*)
++			conf_loadables="${conf_loadables}, \"$image\""
++			;;
++		*)
++			bbfatal "UBOOT_FIT_CONF_LOADABLES: $image is not in UBOOT_FIT_IMAGES"
++			;;
++		esac
++	done
++
+ 	conf_sign_images=""
+ 	conf_sign_images_sep=""
+ 
