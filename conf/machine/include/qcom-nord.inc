@@ -30,3 +30,13 @@ QCOM_UBOOT_SPL_FIT_TEE ?= "optee-os-qcom-nord"
 
 # The Nord SPL loads a FIT with extra image data.
 FIT_MKIMAGE_EXTRA_OPTS:pn-u-boot-qcom ?= "-E"
+
+# The TZ access control config is loaded along with BL31, OP-TEE and U-Boot,
+# from the boot firmware recipe.
+QCOM_UBOOT_SPL_FIT_FIRMWARE ?= "firmware-qcom-boot-nord"
+UBOOT_FIT_IMAGES ?= "tz_ac_config"
+UBOOT_FIT_IMAGE_DESC[tz_ac_config] ?= "TZ Access Control Config"
+UBOOT_FIT_IMAGE_FILE[tz_ac_config] ?= "tz_ac_config.bin"
+UBOOT_FIT_IMAGE_LOAD[tz_ac_config] ?= "0xBC000000"
+UBOOT_FIT_IMAGE_ENTRY[tz_ac_config] ?= "0xBC000000"
+UBOOT_FIT_CONF_LOADABLES ?= "tz_ac_config"
