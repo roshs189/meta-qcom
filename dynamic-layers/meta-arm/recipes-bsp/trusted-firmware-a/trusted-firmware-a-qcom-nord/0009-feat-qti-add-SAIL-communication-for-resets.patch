@@ -1,0 +1,248 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Date: Mon, 16 Nov 2026 00:07:33 +0530
+Subject: [PATCH 09/10] feat(qti): add SAIL communication for resets
+
+Notify the companion SAIL die before powering off or resetting the
+system. Nord sends the request through TCSR and waits up to one
+second for SAIL readiness before asserting PS_HOLD. Other QTI targets
+build no-op implementations. Add Nord's PS_HOLD definition and a
+10 ms settling delay before asserting PS_HOLD.
+
+Validation:
+- `make -j8 PLAT=nord DEBUG=1` passes.
+- QCS615's no-op path compiles; its full build remains blocked by the
+  unrelated missing `qti_cpu.h` include in `qti_bl31_setup.c`.
+
+Change-Id: Ib31c117f0877b68227affc03c54f5b12c2eb099e
+Assisted-by: GPT-5.6
+Signed-off-by: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Link: https://review.trustedfirmware.org/c/TF-A/trusted-firmware-a/+/56540
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/trusted-firmware-a/pull/131]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ drivers/qti/sail_comm/sail_comm.c         | 96 +++++++++++++++++++++++
+ drivers/qti/sail_comm/sail_comm.mk        |  7 ++
+ include/drivers/qti/sail_comm/sail_comm.h | 23 ++++++
+ plat/qti/common/src/qti_pm.c              |  6 ++
+ plat/qti/wildcat/nord/inc/platform_def.h  |  1 +
+ plat/qti/wildcat/nord/platform.mk         |  3 +
+ 6 files changed, 136 insertions(+)
+ create mode 100644 drivers/qti/sail_comm/sail_comm.c
+ create mode 100644 drivers/qti/sail_comm/sail_comm.mk
+ create mode 100644 include/drivers/qti/sail_comm/sail_comm.h
+
+diff --git a/drivers/qti/sail_comm/sail_comm.c b/drivers/qti/sail_comm/sail_comm.c
+new file mode 100644
+index 000000000..d7f50aafa
+--- /dev/null
++++ b/drivers/qti/sail_comm/sail_comm.c
+@@ -0,0 +1,96 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#include <drivers/qti/sail_comm/sail_comm.h>
++
++#ifdef QTI_SAIL_COMM
++
++#include <arch_helpers.h>
++#include <drivers/delay_timer.h>
++#include <lib/mmio.h>
++#include <platform_def.h>
++
++#define WAIT_FOR_SAIL_MS		U(1000)
++
++#define QTI_TCSR_MAIN2SAIL_GP_NONSEC_STATUS7_REG	U(0x01F7A028)
++#define QTI_TCSR_MAIN2SAIL_GP_NONSEC_STATUS8_REG	U(0x01F7A02C)
++#define QTI_TCSR_SAIL2MAIN_GP_NONSEC_SHADOW_STATUS4_REG	U(0x01F7B014)
++
++#define QTI_APSS_INTU_TZ_IPC_INTERRUPT			U(0x17824004)
++#define QTI_APSS_INTU_TZ_IPC_INTERRUPT_SMSS_TZ_IPC_BMSK	U(0x0080000)
++
++#define QTI_MD_SD_MSG_TYPE_SHIFT	U(16)
++#define QTI_MD_SD_MSG_TYPE_MASK		(U(0xFF) << QTI_MD_SD_MSG_TYPE_SHIFT)
++#define QTI_MD_SD_SUBSYS_TYPE_SHIFT	U(24)
++#define QTI_MD_SD_SUBSYS_TYPE_MASK	(U(0xFF) << QTI_MD_SD_SUBSYS_TYPE_SHIFT)
++
++#define QTI_SAIL_RESET_READY		U(0xA0300100)
++#define QTI_MD_GRACEFUL_SHUTDOWN	U(0xB2200430)
++#define QTI_MD_SOC_HR			U(0xB2200510)
++#define QTI_MD_SD_TZ_SRC		U(0xB2)
++#define QTI_MD_SD_NO_ACK		U(0x10)
++#define QTI_MD_SD_WAIT_FOR_ACK		U(0x20)
++
++#define QTI_MD_SD_GET_MSG_TYPE(x)	\
++	(((x) & QTI_MD_SD_MSG_TYPE_MASK) >> QTI_MD_SD_MSG_TYPE_SHIFT)
++#define QTI_MD_SD_GET_SUBSYS_TYPE(x)	\
++	(((x) & QTI_MD_SD_SUBSYS_TYPE_MASK) >> QTI_MD_SD_SUBSYS_TYPE_SHIFT)
++
++static void qti_md_sd_write_status(uint32_t status)
++{
++	uint32_t msg_type = QTI_MD_SD_GET_MSG_TYPE(status);
++	uint32_t subsys = QTI_MD_SD_GET_SUBSYS_TYPE(status);
++
++	if (subsys != QTI_MD_SD_TZ_SRC) {
++		return;
++	}
++
++	if (msg_type == QTI_MD_SD_NO_ACK) {
++		mmio_write_32(QTI_TCSR_MAIN2SAIL_GP_NONSEC_STATUS7_REG, status);
++	} else if (msg_type == QTI_MD_SD_WAIT_FOR_ACK) {
++		mmio_write_32(QTI_TCSR_MAIN2SAIL_GP_NONSEC_STATUS8_REG, status);
++	} else {
++		return;
++	}
++
++	dsbsy();
++	isb();
++	mmio_write_32(QTI_APSS_INTU_TZ_IPC_INTERRUPT,
++		      QTI_APSS_INTU_TZ_IPC_INTERRUPT_SMSS_TZ_IPC_BMSK);
++}
++
++static uint32_t qti_md_sd_read_sail_status(void)
++{
++	return mmio_read_32(QTI_TCSR_SAIL2MAIN_GP_NONSEC_SHADOW_STATUS4_REG);
++}
++
++static void qti_md_sd_psci_status_com(uint32_t status_to_sd)
++{
++	qti_md_sd_write_status(status_to_sd);
++
++	if (QTI_MD_SD_GET_MSG_TYPE(status_to_sd) == QTI_MD_SD_NO_ACK) {
++		return;
++	}
++
++	for (uint32_t count = 0U; count < WAIT_FOR_SAIL_MS; count++) {
++		mdelay(1);
++		if (qti_md_sd_read_sail_status() == QTI_SAIL_RESET_READY) {
++			break;
++		}
++	}
++}
++
++void qti_sail_comm_system_reset(void)
++{
++	qti_md_sd_psci_status_com(QTI_MD_SOC_HR);
++}
++
++void qti_sail_comm_system_off(void)
++{
++	qti_md_sd_psci_status_com(QTI_MD_GRACEFUL_SHUTDOWN);
++}
++
++#endif /* QTI_SAIL_COMM */
+diff --git a/drivers/qti/sail_comm/sail_comm.mk b/drivers/qti/sail_comm/sail_comm.mk
+new file mode 100644
+index 000000000..6e749aec5
+--- /dev/null
++++ b/drivers/qti/sail_comm/sail_comm.mk
+@@ -0,0 +1,7 @@
++#
++# Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++#
++# SPDX-License-Identifier: BSD-3-Clause
++#
++
++BL31_SOURCES += drivers/qti/sail_comm/sail_comm.c
+diff --git a/include/drivers/qti/sail_comm/sail_comm.h b/include/drivers/qti/sail_comm/sail_comm.h
+new file mode 100644
+index 000000000..25e8ebb1b
+--- /dev/null
++++ b/include/drivers/qti/sail_comm/sail_comm.h
+@@ -0,0 +1,23 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#ifndef QTI_SAIL_COMM_H
++#define QTI_SAIL_COMM_H
++
++#ifdef QTI_SAIL_COMM
++
++/* Notify a companion SAIL die before the platform powers off or resets. */
++void qti_sail_comm_system_off(void);
++void qti_sail_comm_system_reset(void);
++
++#else
++
++static inline void qti_sail_comm_system_off(void) {}
++static inline void qti_sail_comm_system_reset(void) {}
++
++#endif /* QTI_SAIL_COMM */
++
++#endif /* QTI_SAIL_COMM_H */
+diff --git a/plat/qti/common/src/qti_pm.c b/plat/qti/common/src/qti_pm.c
+index 65136d682..213dde8c9 100644
+--- a/plat/qti/common/src/qti_pm.c
++++ b/plat/qti/common/src/qti_pm.c
+@@ -10,6 +10,7 @@
+ #include <bl31/bl31.h>
+ #include <common/debug.h>
+ #include <drivers/delay_timer.h>
++#include <drivers/qti/sail_comm/sail_comm.h>
+ #include <drivers/qti/sec_core/sec_core.h>
+ #include <lib/mmio.h>
+ #include <lib/psci/psci.h>
+@@ -180,9 +181,12 @@ static void qti_node_suspend_finish(const psci_power_state_t *target_state)
+ 	}
+ }
+ 
++#define PS_HOLD_SETTLE_DELAY_MS		10U
++
+ static __dead2 void assert_ps_hold(void)
+ {
+ #ifdef QTI_PS_HOLD_REG
++	mdelay(PS_HOLD_SETTLE_DELAY_MS);
+ 	mmio_write_32(QTI_PS_HOLD_REG, 0);
+ 	mdelay(1000);
+ #endif
+@@ -194,12 +198,14 @@ static __dead2 void assert_ps_hold(void)
+ __dead2 void qti_system_off(void)
+ {
+ 	qti_pmic_prepare_shutdown();
++	qti_sail_comm_system_off();
+ 	assert_ps_hold();
+ }
+ 
+ __dead2 void qti_system_reset(void)
+ {
+ 	qti_pmic_prepare_reset();
++	qti_sail_comm_system_reset();
+ 	assert_ps_hold();
+ }
+ 
+diff --git a/plat/qti/wildcat/nord/inc/platform_def.h b/plat/qti/wildcat/nord/inc/platform_def.h
+index d35f6d1ac..675c7c902 100644
+--- a/plat/qti/wildcat/nord/inc/platform_def.h
++++ b/plat/qti/wildcat/nord/inc/platform_def.h
+@@ -161,6 +161,7 @@
+ /*----------------------------------------------------------------------------*/
+ /* LC PON register offsets */
+ /*----------------------------------------------------------------------------*/
++#define QTI_PS_HOLD_REG 0xC264000
+ #define PON_PS_HOLD_RESET_CTL 0x852
+ #define PON_PS_HOLD_RESET_CTL2 0x853
+ 
+diff --git a/plat/qti/wildcat/nord/platform.mk b/plat/qti/wildcat/nord/platform.mk
+index 71208d048..ecd302f92 100644
+--- a/plat/qti/wildcat/nord/platform.mk
++++ b/plat/qti/wildcat/nord/platform.mk
+@@ -12,6 +12,7 @@ PLATFORM		:=	nord
+ ARM_ARCH_MAJOR := 9
+ 
+ QTI_NCC_CPU		:= 1
++$(eval $(call add_define,QTI_SAIL_COMM))
+ 
+ # Turn On Separate code & data.
+ SEPARATE_CODE_AND_RODATA	:=	1
+@@ -242,3 +243,5 @@ include $(QTI_PLAT_PATH)/common/wildcat_common.mk
+ 
+ include drivers/qti/watchdog/watchdog.mk
+ PLAT_INCLUDES	+=	-Iinclude/drivers/qti/cpucp/${CHIPSET}
++
++include drivers/qti/sail_comm/sail_comm.mk

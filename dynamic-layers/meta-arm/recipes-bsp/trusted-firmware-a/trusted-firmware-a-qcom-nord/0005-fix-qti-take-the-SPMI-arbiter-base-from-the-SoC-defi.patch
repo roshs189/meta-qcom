@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Igor Opaniuk <igor.opaniuk@oss.qualcomm.com>
+Date: Mon, 26 Oct 2026 18:21:30 +0100
+Subject: [PATCH 05/10] fix(qti): take the SPMI arbiter base from the SoC
+ definitions
+
+The SPMI arbiter driver hardcodes the hoya register addresses, but
+shikra builds it too, with the arbiter at 0x01C00000 instead of
+0x0C400000 (per ipcat: PMIC_ARB_REG_ADDRn at 0x01C40900 and the
+PMIC_ARB_CHNLn registers at 0x01E00000, as on the other bruin SoCs).
+On every PSCI SYSTEM_RESET and SYSTEM_OFF, which configure the PON
+PS_HOLD function through the arbiter, shikra thus reads the APID map
+from unmapped address space at 0x0C440900 and writes the SPMI command
+word into the APPS MMU-500 secure configuration register
+(APPS_SMMU_SCR0) at 0x0C600000.
+
+Derive the register addresses from PMIC_ARB_BASE instead: shikra_def.h
+already defines it, unused until now, and hoya_def.h gains it with the
+address the driver used to hardcode, so the hoya platforms are
+unchanged. The APID map and the channel registers lie at the same
+offsets from the base on both SoCs.
+
+Fixes: 0cc5324171e0
+Change-Id: I613948ad84ca0b39a28d57c912f25f26627c7961
+Link: https://review.trustedfirmware.org/c/55732
+Signed-off-by: Tyler Baker <tyler.baker@oss.qualcomm.com>
+Signed-off-by: Igor Opaniuk <igor.opaniuk@oss.qualcomm.com>
+Upstream-Status: Backport [https://github.com/qualcomm-linux/trusted-firmware-a/commit/62c968a0dc544b5cad48d88813b88b9ba7931479]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/common/src/spmi_arb.c | 15 ++++++++++-----
+ plat/qti/hoya/inc/hoya_def.h   |  5 +++++
+ 2 files changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/plat/qti/common/src/spmi_arb.c b/plat/qti/common/src/spmi_arb.c
+index 4213ed1b3..06e81d496 100644
+--- a/plat/qti/common/src/spmi_arb.c
++++ b/plat/qti/common/src/spmi_arb.c
+@@ -8,19 +8,24 @@
+ #include <drivers/delay_timer.h>
+ #include <lib/mmio.h>
+ 
++#include <platform_def.h>
+ #include <spmi_arb.h>
+ 
+-#define REG_APID_MAP(apid)	(0x0C440900U + sizeof(uint32_t) * apid)
++/* Arbiter core and channel registers, at fixed offsets from PMIC_ARB_BASE */
++#define REG_ARB_CORE		(PMIC_ARB_BASE + 0x40000U)
++#define REG_ARB_CHNL(apid)	(PMIC_ARB_BASE + 0x200000U + 0x10000U * apid)
++
++#define REG_APID_MAP(apid)	(REG_ARB_CORE + 0x900U + sizeof(uint32_t) * apid)
+ #define NUM_APID		((0x1100U - 0x900U) / sizeof(uint32_t))
+ 
+ #define PPID_MASK		(0xfffU << 8)
+ 
+-#define REG_ARB_CMD(apid)	(0x0C600000U + 0x10000U * apid)
++#define REG_ARB_CMD(apid)	(REG_ARB_CHNL(apid) + 0x0U)
+ /* These are opcodes specific to this SPMI arbitrator, *not* SPMI commands. */
+ #define OPC_EXT_WRITEL		0
+ #define OPC_EXT_READL		1
+ 
+-#define REG_ARB_STATUS(apid)	(0x0C600008U + 0x10000U * apid)
++#define REG_ARB_STATUS(apid)	(REG_ARB_CHNL(apid) + 0x8U)
+ #define ARB_STATUS_DONE		BIT(0)
+ #define ARB_STATUS_FAILURE	BIT(1)
+ #define ARB_STATUS_DENIED	BIT(2)
+@@ -29,8 +34,8 @@
+ /* Fake status to report driver errors. */
+ #define ARB_FAKE_STATUS_TIMEOUT	BIT(8)
+ 
+-#define REG_ARB_RDATA0(apid)	(0x0C600018U + 0x10000U * apid)
+-#define REG_ARB_WDATA0(apid)	(0x0C600010U + 0x10000U * apid)
++#define REG_ARB_RDATA0(apid)	(REG_ARB_CHNL(apid) + 0x18U)
++#define REG_ARB_WDATA0(apid)	(REG_ARB_CHNL(apid) + 0x10U)
+ 
+ static int addr_to_apid(uint32_t addr)
+ {
+diff --git a/plat/qti/hoya/inc/hoya_def.h b/plat/qti/hoya/inc/hoya_def.h
+index 502a16351..0f344be16 100644
+--- a/plat/qti/hoya/inc/hoya_def.h
++++ b/plat/qti/hoya/inc/hoya_def.h
+@@ -149,6 +149,11 @@
+ /*----------------------------------------------------------------------------*/
+ #define QTI_PS_HOLD_REG				0x0C264000
+ 
++/*----------------------------------------------------------------------------*/
++/* PMIC SPMI arbiter base address                                             */
++/*----------------------------------------------------------------------------*/
++#define PMIC_ARB_BASE				0x0C400000
++
+ /*----------------------------------------------------------------------------*/
+ /* SOC hw version register */
+ /*----------------------------------------------------------------------------*/

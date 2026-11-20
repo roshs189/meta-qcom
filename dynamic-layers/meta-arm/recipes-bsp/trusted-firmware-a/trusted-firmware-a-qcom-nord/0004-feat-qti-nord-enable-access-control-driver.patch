@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Somesh Velupally <somegupt@qti.qualcomm.com>
+Date: Mon, 16 Nov 2026 18:38:16 +0530
+Subject: [PATCH 04/10] feat(qti/nord): enable access control driver
+
+Wire up the access-control driver for Nord, which uses the XPU4 hardware generation.
+
+platform_def.h gains the TZ and HYP AC config image SW type IDs, base addresses and sizes. platform.mk sets XPU_VERSION=4, includes access_control.mk, and adds the Nord-specific plat_ac_cfg.c source. The
+  previously listed access_control_stub.c is removed as it is superseded by the full driver.
+
+plat_ac_cfg.c implements plat_qti_ac_get_config_image(), returning the TZ AC config image base address and size defined in platform_def.h.
+
+Signed-off-by: Somesh Velupally <somegupt@qti.qualcomm.com>
+Upstream-Status: Backport [https://github.com/qualcomm-linux/trusted-firmware-a/commit/792c8710c6d6edc4ebd834ed80fa46e1fb2190a4]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/wildcat/nord/inc/platform_def.h | 10 ++++++++++
+ plat/qti/wildcat/nord/platform.mk        |  4 +++-
+ plat/qti/wildcat/nord/src/plat_ac_cfg.c  | 23 +++++++++++++++++++++++
+ 3 files changed, 36 insertions(+), 1 deletion(-)
+ create mode 100644 plat/qti/wildcat/nord/src/plat_ac_cfg.c
+
+diff --git a/plat/qti/wildcat/nord/inc/platform_def.h b/plat/qti/wildcat/nord/inc/platform_def.h
+index 23a0c13a6..d35f6d1ac 100644
+--- a/plat/qti/wildcat/nord/inc/platform_def.h
++++ b/plat/qti/wildcat/nord/inc/platform_def.h
+@@ -179,6 +179,16 @@
+ /* Number of boot image entries supported for the platform */
+ #define BOOT_IMAGES_NUM_ENTRIES 25
+ 
++/*
++ * TZ AC config and HYP AC config SW ids, base addresses and sizes.
++ */
++#define TZ_AC_CONFIG_SW_TYPE		0x96
++#define HYP_AC_CONFIG_SW_TYPE		0x97
++#define TZ_TZ_AC_CONFIG_BASE_ADDR	UL(0xBC000000)
++#define TZ_TZ_AC_CONFIG_SIZE		0x10000		/* 64 KB */
++#define TZ_HYP_AC_CONFIG_BASE_ADDR	UL(0x83DE7000)
++#define TZ_HYP_AC_CONFIG_SIZE		0x10000		/* 64 KB */
++
+ /* SCMI channel parameters for CPUCP communication.                          */
+ /*                                                                            */
+ /* Mailbox:  CPUCP DTIM0 + 0x3000 = 0x18b33000 (AP Secure to CPUCP buffer)  */
+diff --git a/plat/qti/wildcat/nord/platform.mk b/plat/qti/wildcat/nord/platform.mk
+index 7244fa1c1..71208d048 100644
+--- a/plat/qti/wildcat/nord/platform.mk
++++ b/plat/qti/wildcat/nord/platform.mk
+@@ -133,7 +133,6 @@ QTI_BL31_SOURCES	:=	$(QTI_PLAT_PATH)/common/src/$(ARCH)/wildcat_helpers.S	\
+ 				$(QTI_PLAT_PATH)/common/src/wildcat_plat_helpers.c \
+ 				$(QTI_PLAT_PATH)/common/src/wildcat_bl31_setup.c \
+ 				$(QTI_PLAT_PATH)/${CHIPSET}/src/plat_cpuss_config.c \
+-				drivers/qti/accesscontrol/access_control_stub.c \
+ 				drivers/qti/sec_core/sec_core.c 			\
+ 				drivers/qti/sec_core/${CHIPSET}/sec_core_cfg.c 		\
+ 				drivers/qti/crypto/rng.c
+@@ -226,6 +225,9 @@ BL31_SOURCES		+=	${QTI_BL31_SOURCES}				\
+ 				${BL31_CPU_SETUP_SRC}				\
+ 				${SCMI_SOURCES}
+ 
++XPU_VERSION		:= 4
++include drivers/qti/accesscontrol/access_control.mk
++BL31_SOURCES		+=	$(QTI_PLAT_PATH)/${CHIPSET}/src/plat_ac_cfg.c
+ BL31_SOURCES += drivers/qti/qtimer/qtimer.c \
+ 			drivers/qti/qtimer/qtimer_ncc.c \
+ 			$(PLAT_QTI_ROOT)/common/src/qti_qtimer_platform.c
+diff --git a/plat/qti/wildcat/nord/src/plat_ac_cfg.c b/plat/qti/wildcat/nord/src/plat_ac_cfg.c
+new file mode 100644
+index 000000000..b98d23014
+--- /dev/null
++++ b/plat/qti/wildcat/nord/src/plat_ac_cfg.c
+@@ -0,0 +1,23 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#include <errno.h>
++
++#include <platform_def.h>
++
++#include <ac_cfg.h>
++
++int plat_qti_ac_get_config_image(uintptr_t *base, size_t *size)
++{
++	if (base == NULL || size == NULL) {
++		return -EINVAL;
++	}
++
++	*base = TZ_TZ_AC_CONFIG_BASE_ADDR;
++	*size = TZ_TZ_AC_CONFIG_SIZE;
++
++	return 0;
++}

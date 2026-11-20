@@ -1,0 +1,240 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Date: Mon, 12 Oct 2026 18:46:45 +0530
+Subject: [PATCH 11/13] feat(qti): enable nord RPMh and CMD DB support
+
+Add the Nord RSC register layout and message RAM parameters for RPMh.
+Define the Nord AOP command DB mapping and APSS HM and AOSS address
+ranges.
+
+Nord configuration was checked for the Nord SoC.
+
+Co-authored-by: Shivam Sanjay <shivsanj@qti.qualcomm.com>
+Assisted-by: OpenAI:gpt-5 [codex]
+Signed-off-by: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Change-Id: I7b11d7a302b9278bd9ce546f0c92bfe93b926175
+Link: https://review.trustedfirmware.org/c/TF-A/trusted-firmware-a/+/55337
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/trusted-firmware-a/pull/132]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ .../rsc_regs.h => common/rpmh_common.h}       | 53 ++++++++-----------
+ drivers/qti/rpmh/lemans/rpmh_target.h         | 14 ++---
+ drivers/qti/rpmh/nord/rpmh_target.h           | 20 +++++++
+ drivers/qti/rpmh/rpmh.mk                      |  3 +-
+ drivers/qti/rpmh/rpmh_client.c                |  2 -
+ plat/qti/wildcat/nord/inc/nord_def.h          | 22 ++++++++
+ 6 files changed, 75 insertions(+), 39 deletions(-)
+ rename drivers/qti/rpmh/{lemans/rsc_regs.h => common/rpmh_common.h} (72%)
+ create mode 100644 drivers/qti/rpmh/nord/rpmh_target.h
+ create mode 100644 plat/qti/wildcat/nord/inc/nord_def.h
+
+diff --git a/drivers/qti/rpmh/lemans/rsc_regs.h b/drivers/qti/rpmh/common/rpmh_common.h
+similarity index 72%
+rename from drivers/qti/rpmh/lemans/rsc_regs.h
+rename to drivers/qti/rpmh/common/rpmh_common.h
+index 5933a3c5b..50d709742 100644
+--- a/drivers/qti/rpmh/lemans/rsc_regs.h
++++ b/drivers/qti/rpmh/common/rpmh_common.h
+@@ -2,55 +2,53 @@
+  * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+  *
+  * SPDX-License-Identifier: BSD-3-Clause
+- *
+- * RSC (Resource State Coordinator) register definitions for the lemans
+- * (qcs9075) APSS RPMh controller, DRV0 (TZ) view.
+  */
+ 
+-#ifndef RSC_REGS_H
+-#define RSC_REGS_H
++#ifndef RPMH_COMMON_H
++#define RPMH_COMMON_H
++
++#include <stdint.h>
+ 
+-#include <lib/mmio.h>
+ #include <lib/utils_def.h>
+ 
+-#include <platform_def.h>
++#define TCS_SIZE			16U
+ 
+-/*
+- * APSS RSC register base. Derived from the HW description:
+- *   APSS_RSC_RSCC_RSCC_RSC_REG_BASE = QTI_APSS_HM_BASE + 0x00a00000
+- */
+-#define RSC_REG_BASE			(QTI_APSS_HM_BASE + 0x00a00000U)
++#define RPMH_AOP_MSG_RAM_BASE		0x0c300000U
++#define RPMH_AOP_MSG_RAM_SIZE		0x00100000U
++#define RPMH_AOP_BOOT_COOKIE_SECTION	0xfU
++#define RPMH_AOP_MSG_RAM_DICT_BASE	(RPMH_AOP_MSG_RAM_BASE + \
++					 (RPMH_AOP_BOOT_COOKIE_SECTION * \
++					  RPMH_MSG_RAM_SECTION_SIZE))
+ 
+-/* Per-DRV AMC-mode IRQ registers (DRV0). */
++/* Shared RSC (Resource State Coordinator) register offsets and fields. */
+ #define RSC_AMC_IRQ_ENABLE_OFF		0xd00U
+ #define RSC_AMC_IRQ_STATUS_OFF		0xd04U
+ #define RSC_AMC_IRQ_CLEAR_OFF		0xd08U
+-
+-/* Per-TCS register block within DRV0. */
+ #define RSC_TCS_STRIDE			0x2a0U
+-#define RSC_TCS_BASE_OFF		0xd10U
+ 
+ #define RSC_TCS_CMD_WAIT_FOR_CMPL_OFF	0x00U
+ #define RSC_TCS_CONTROL_OFF		0x04U
+ #define RSC_TCS_STATUS_OFF		0x08U
+ #define RSC_TCS_CMD_ENABLE_OFF		0x0cU
+ 
++#define RSC_CMD_STATUS_OFF		0x0cU
++#define RSC_CMD_RESP_DATA_OFF		0x10U
++
++/* CMD STATUS register fields. */
++#define RSC_CMD_STATUS_COMPLETED	BIT(16)
++#define RSC_CMD_STATUS_ISSUED		BIT(8)
++#define RSC_CMD_STATUS_TRIGGERED	BIT(0)
++
+ /* CONTROL register fields. */
+ #define RSC_TCS_CONTROL_AMC_MODE_TRIGGER	BIT(24)
+-#define RSC_TCS_CONTROL_AMC_MODE_EN		BIT(16)
++#define RSC_TCS_CONTROL_AMC_MODE_EN	BIT(16)
+ 
+ /* STATUS register fields. */
+-#define RSC_TCS_STATUS_CONTROLLER_IDLE		BIT(0)
+-
+-/* Per-command register block within a TCS. */
+-#define RSC_CMD_STRIDE			0x14U
+-#define RSC_CMD_BASE_OFF		0xd30U
++#define RSC_TCS_STATUS_CONTROLLER_IDLE	BIT(0)
+ 
+ #define RSC_CMD_MSGID_OFF		0x00U
+ #define RSC_CMD_ADDR_OFF		0x04U
+ #define RSC_CMD_DATA_OFF		0x08U
+-#define RSC_CMD_STATUS_OFF		0x0cU
+-#define RSC_CMD_RESP_DATA_OFF		0x10U
+ 
+ /* MSGID register fields. */
+ #define RSC_CMD_MSGID_READ_OR_WRITE	BIT(16)
+@@ -64,11 +62,6 @@
+ #define RSC_CMD_ADDR_OFFSET_SHFT	0U
+ #define RSC_CMD_ADDR_OFFSET_MASK	0xffffU
+ 
+-/* CMD STATUS register fields. */
+-#define RSC_CMD_STATUS_COMPLETED	BIT(16)
+-#define RSC_CMD_STATUS_ISSUED		BIT(8)
+-#define RSC_CMD_STATUS_TRIGGERED	BIT(0)
+-
+ /* Each RPMh command transfers a single 32-bit word (encoded as 8 bytes). */
+ #define RSC_CMD_DATA_LEN		8U
+ 
+@@ -88,4 +81,4 @@
+ 	RSC_DRV0_REG(RSC_CMD_BASE_OFF + (RSC_TCS_STRIDE * (uint32_t)(tcs)) + \
+ 		     (RSC_CMD_STRIDE * (uint32_t)(cmd)) + (uint32_t)(off))
+ 
+-#endif /* RSC_REGS_H */
++#endif /* RPMH_COMMON_H */
+diff --git a/drivers/qti/rpmh/lemans/rpmh_target.h b/drivers/qti/rpmh/lemans/rpmh_target.h
+index 5c3dbf59b..304898852 100644
+--- a/drivers/qti/rpmh/lemans/rpmh_target.h
++++ b/drivers/qti/rpmh/lemans/rpmh_target.h
+@@ -7,13 +7,15 @@
+ #ifndef RPMH_TARGET_H
+ #define RPMH_TARGET_H
+ 
+-#define TCS_SIZE	16U
++#include <platform_def.h>
++#include <rpmh_common.h>
+ 
+-#define RPMH_AOP_MSG_RAM_BASE		0x0c300000U
+-#define RPMH_AOP_MSG_RAM_SIZE		0x00100000U
+ #define RPMH_MSG_RAM_SECTION_SIZE	0x10000U
+-#define RPMH_AOP_MSG_RAM_DICT_BASE	(RPMH_AOP_MSG_RAM_BASE + \
+-					 RPMH_AOP_MSG_RAM_SIZE - \
+-					 RPMH_MSG_RAM_SECTION_SIZE)
++
++/* APSS RSC register layout for LeMans. */
++#define RSC_REG_BASE			(QTI_APSS_HM_BASE + 0x00a00000U)
++#define RSC_TCS_BASE_OFF		0xd10U
++#define RSC_CMD_STRIDE			0x14U
++#define RSC_CMD_BASE_OFF		0xd30U
+ 
+ #endif /* RPMH_TARGET_H */
+diff --git a/drivers/qti/rpmh/nord/rpmh_target.h b/drivers/qti/rpmh/nord/rpmh_target.h
+new file mode 100644
+index 000000000..108334e95
+--- /dev/null
++++ b/drivers/qti/rpmh/nord/rpmh_target.h
+@@ -0,0 +1,20 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#ifndef RPMH_TARGET_H
++#define RPMH_TARGET_H
++
++#include <rpmh_common.h>
++
++#define RPMH_MSG_RAM_SECTION_SIZE	0x1000U
++
++/* APSS RSC register layout for Nord. */
++#define RSC_REG_BASE			0x18900000U
++#define RSC_TCS_BASE_OFF		0xd20U
++#define RSC_CMD_STRIDE			0x18U
++#define RSC_CMD_BASE_OFF		0xd34U
++
++#endif /* RPMH_TARGET_H */
+diff --git a/drivers/qti/rpmh/rpmh.mk b/drivers/qti/rpmh/rpmh.mk
+index 52fcd593f..2551ff019 100644
+--- a/drivers/qti/rpmh/rpmh.mk
++++ b/drivers/qti/rpmh/rpmh.mk
+@@ -12,7 +12,8 @@ RPMH_DRV_PATH := drivers/qti/rpmh
+ 
+ PLAT_INCLUDES += \
+ 	-I$(RPMH_DRV_PATH) \
+-	-I$(RPMH_DRV_PATH)/$(CHIPSET)
++	-I$(RPMH_DRV_PATH)/$(CHIPSET) \
++	-I$(RPMH_DRV_PATH)/common
+ 
+ BL31_SOURCES += \
+ 	$(RPMH_DRV_PATH)/rpmh_client.c
+diff --git a/drivers/qti/rpmh/rpmh_client.c b/drivers/qti/rpmh/rpmh_client.c
+index a6444cbfc..db342734e 100644
+--- a/drivers/qti/rpmh/rpmh_client.c
++++ b/drivers/qti/rpmh/rpmh_client.c
+@@ -22,8 +22,6 @@
+ #include <drivers/qti/rpmh/rpmh_client.h>
+ #include <lib/mmio_poll.h>
+ 
+-#include "rsc_regs.h"
+-
+ /*
+  * TZ DRV TCS configuration (matches the RPMh DRV config):
+  *   - 4 TCSs total, the first two are AMC TCSs.
+diff --git a/plat/qti/wildcat/nord/inc/nord_def.h b/plat/qti/wildcat/nord/inc/nord_def.h
+new file mode 100644
+index 000000000..be32a7a15
+--- /dev/null
++++ b/plat/qti/wildcat/nord/inc/nord_def.h
+@@ -0,0 +1,22 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#ifndef NORD_DEF_H
++#define NORD_DEF_H
++
++/* AOP command DB address space for mapping. */
++#define QTI_AOP_CMD_DB_BASE			0x87148000
++#define QTI_AOP_CMD_DB_SIZE			0x00020000
++
++/* APSS HM registers. */
++#define QTI_APSS_HM_BASE			0x17000000
++#define QTI_APSS_HM_SIZE			0x01000000 /* TODO: confirm */
++
++/* AOSS registers. */
++#define QTI_AOSS_BASE				0x0b000000
++#define QTI_AOSS_SIZE				0x04000000
++
++#endif /* NORD_DEF_H */

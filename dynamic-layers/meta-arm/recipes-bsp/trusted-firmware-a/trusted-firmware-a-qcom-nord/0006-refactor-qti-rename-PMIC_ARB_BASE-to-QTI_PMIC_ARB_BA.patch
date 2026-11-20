@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Igor Opaniuk <igor.opaniuk@oss.qualcomm.com>
+Date: Mon, 26 Oct 2026 18:21:40 +0100
+Subject: [PATCH 06/10] refactor(qti): rename PMIC_ARB_BASE to
+ QTI_PMIC_ARB_BASE
+
+Follow the naming convention the other QTI base addresses use.
+
+Change-Id: I762ef33fb137ebf8ade149eaa0253c90af202077
+Link: https://review.trustedfirmware.org/c/55841
+Signed-off-by: Igor Opaniuk <igor.opaniuk@oss.qualcomm.com>
+Upstream-Status: Backport [https://github.com/qualcomm-linux/trusted-firmware-a/commit/0d1b6985b73ed73f8b230a8ae5d62a60fa1e640e]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/bruin/shikra/inc/shikra_def.h | 2 +-
+ plat/qti/common/src/spmi_arb.c         | 6 +++---
+ plat/qti/hoya/inc/hoya_def.h           | 2 +-
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/plat/qti/bruin/shikra/inc/shikra_def.h b/plat/qti/bruin/shikra/inc/shikra_def.h
+index ce43163e7..948ad3225 100644
+--- a/plat/qti/bruin/shikra/inc/shikra_def.h
++++ b/plat/qti/bruin/shikra/inc/shikra_def.h
+@@ -200,7 +200,7 @@
+ /*----------------------------------------------------------------------------*/
+ /* PMIC SPMI arbitrator base address                                          */
+ /*----------------------------------------------------------------------------*/
+-#define PMIC_ARB_BASE				0x01C00000
++#define QTI_PMIC_ARB_BASE				0x01C00000
+ /*----------------------------------------------------------------------------*/
+ /* QTIMER registers                                                           */
+ /*----------------------------------------------------------------------------*/
+diff --git a/plat/qti/common/src/spmi_arb.c b/plat/qti/common/src/spmi_arb.c
+index 06e81d496..2881a27c6 100644
+--- a/plat/qti/common/src/spmi_arb.c
++++ b/plat/qti/common/src/spmi_arb.c
+@@ -11,9 +11,9 @@
+ #include <platform_def.h>
+ #include <spmi_arb.h>
+ 
+-/* Arbiter core and channel registers, at fixed offsets from PMIC_ARB_BASE */
+-#define REG_ARB_CORE		(PMIC_ARB_BASE + 0x40000U)
+-#define REG_ARB_CHNL(apid)	(PMIC_ARB_BASE + 0x200000U + 0x10000U * apid)
++/* Arbiter core and channel registers, at fixed offsets from QTI_PMIC_ARB_BASE */
++#define REG_ARB_CORE		(QTI_PMIC_ARB_BASE + 0x40000U)
++#define REG_ARB_CHNL(apid)	(QTI_PMIC_ARB_BASE + 0x200000U + 0x10000U * apid)
+ 
+ #define REG_APID_MAP(apid)	(REG_ARB_CORE + 0x900U + sizeof(uint32_t) * apid)
+ #define NUM_APID		((0x1100U - 0x900U) / sizeof(uint32_t))
+diff --git a/plat/qti/hoya/inc/hoya_def.h b/plat/qti/hoya/inc/hoya_def.h
+index 0f344be16..7503729b8 100644
+--- a/plat/qti/hoya/inc/hoya_def.h
++++ b/plat/qti/hoya/inc/hoya_def.h
+@@ -152,7 +152,7 @@
+ /*----------------------------------------------------------------------------*/
+ /* PMIC SPMI arbiter base address                                             */
+ /*----------------------------------------------------------------------------*/
+-#define PMIC_ARB_BASE				0x0C400000
++#define QTI_PMIC_ARB_BASE				0x0C400000
+ 
+ /*----------------------------------------------------------------------------*/
+ /* SOC hw version register */

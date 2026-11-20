@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shivam Sanjay <shivsanj@qti.qualcomm.com>
+Date: Fri, 6 Nov 2026 23:13:19 +0530
+Subject: [PATCH 10/10] plat: qti: update PMIC configs for PSCI reset, shutdown
+
+Signed-off-by: Shivam Sanjay <shivsanj@qti.qualcomm.com>
+Link: https://review.trustedfirmware.org/c/TF-A/trusted-firmware-a/+/56750
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/trusted-firmware-a/pull/131]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/common/src/spmi_arb.c           | 61 +++++++++++++++++++++---
+ plat/qti/wildcat/nord/inc/platform_def.h | 33 +++++++++++++
+ 2 files changed, 88 insertions(+), 6 deletions(-)
+
+diff --git a/plat/qti/common/src/spmi_arb.c b/plat/qti/common/src/spmi_arb.c
+index 2881a27c6..60a8a2032 100644
+--- a/plat/qti/common/src/spmi_arb.c
++++ b/plat/qti/common/src/spmi_arb.c
+@@ -15,17 +15,35 @@
+ #define REG_ARB_CORE		(QTI_PMIC_ARB_BASE + 0x40000U)
+ #define REG_ARB_CHNL(apid)	(QTI_PMIC_ARB_BASE + 0x200000U + 0x10000U * apid)
+ 
+-#define REG_APID_MAP(apid)	(REG_ARB_CORE + 0x900U + sizeof(uint32_t) * apid)
+-#define NUM_APID		((0x1100U - 0x900U) / sizeof(uint32_t))
++/*
++ * APID table base and per-channel register base/stride differ across PMIC
++ * arbiter hardware versions. Platforms override these in platform_def.h
++ * when their arbiter instance doesn't match the defaults below.
++ */
++#ifndef SPMI_ARB_APID_MAP_BASE
++#define SPMI_ARB_APID_MAP_BASE	(REG_ARB_CORE + 0x900U)
++#endif
++#ifndef SPMI_ARB_CHNL_BASE
++#define SPMI_ARB_CHNL_BASE	REG_ARB_CHNL(0U)
++#endif
++#ifndef SPMI_ARB_CHNL_STRIDE
++#define SPMI_ARB_CHNL_STRIDE	0x10000U
++#endif
++
++#define REG_APID_MAP(apid)	((uint32_t)(SPMI_ARB_APID_MAP_BASE + sizeof(uint32_t) * apid))
++#ifndef SPMI_ARB_NUM_APID
++#define SPMI_ARB_NUM_APID	((0x1100U - 0x900U) / sizeof(uint32_t))
++#endif
++#define NUM_APID		SPMI_ARB_NUM_APID
+ 
+ #define PPID_MASK		(0xfffU << 8)
+ 
+-#define REG_ARB_CMD(apid)	(REG_ARB_CHNL(apid) + 0x0U)
++#define REG_ARB_CMD(apid)	((uint32_t)(SPMI_ARB_CHNL_BASE + SPMI_ARB_CHNL_STRIDE * apid))
+ /* These are opcodes specific to this SPMI arbitrator, *not* SPMI commands. */
+ #define OPC_EXT_WRITEL		0
+ #define OPC_EXT_READL		1
+ 
+-#define REG_ARB_STATUS(apid)	(REG_ARB_CHNL(apid) + 0x8U)
++#define REG_ARB_STATUS(apid)	((uint32_t)(SPMI_ARB_CHNL_BASE + 0x8U + SPMI_ARB_CHNL_STRIDE * apid))
+ #define ARB_STATUS_DONE		BIT(0)
+ #define ARB_STATUS_FAILURE	BIT(1)
+ #define ARB_STATUS_DENIED	BIT(2)
+@@ -34,20 +52,51 @@
+ /* Fake status to report driver errors. */
+ #define ARB_FAKE_STATUS_TIMEOUT	BIT(8)
+ 
+-#define REG_ARB_RDATA0(apid)	(REG_ARB_CHNL(apid) + 0x18U)
+-#define REG_ARB_WDATA0(apid)	(REG_ARB_CHNL(apid) + 0x10U)
++#define REG_ARB_RDATA0(apid)	((uint32_t)(SPMI_ARB_CHNL_BASE + 0x18U + SPMI_ARB_CHNL_STRIDE * apid))
++#define REG_ARB_WDATA0(apid)	((uint32_t)(SPMI_ARB_CHNL_BASE + 0x10U + SPMI_ARB_CHNL_STRIDE * apid))
++
++#if defined(SPMI_ARB_OWNER_MAP_BASE) && defined(SPMI_ARB_OWNER_STRIDE) && defined(SPMI_ARB_OWNER_EE)
++#define SPMI_ARB_OWNER_CHECK_ENABLED	1
++#define REG_APID_OWNER(apid)	((uint32_t)(SPMI_ARB_OWNER_MAP_BASE + SPMI_ARB_OWNER_STRIDE * apid))
++#define OWNER_FIELD_MASK	0xfU
++#endif
+ 
+ static int addr_to_apid(uint32_t addr)
+ {
+ 	unsigned int i;
++#ifdef SPMI_ARB_OWNER_CHECK_ENABLED
++	int fallback_apid = -1;
++#endif
+ 
+ 	for (i = 0U; i < NUM_APID; i++) {
+ 		uint32_t reg = mmio_read_32(REG_APID_MAP(i));
++
+ 		if ((reg != 0U) && ((addr & PPID_MASK) == (reg & PPID_MASK))) {
++#ifdef SPMI_ARB_OWNER_CHECK_ENABLED
++			uint32_t owner_reg = mmio_read_32(REG_APID_OWNER(i));
++			uint32_t owner = owner_reg & OWNER_FIELD_MASK;
++
++			if (owner == (uint32_t)SPMI_ARB_OWNER_EE) {
++				return i;
++			}
++			if (fallback_apid < 0) {
++				fallback_apid = (int)i;
++			}
++			continue;
++#else
+ 			return i;
++#endif
+ 		}
+ 	}
+ 
++#ifdef SPMI_ARB_OWNER_CHECK_ENABLED
++	if (fallback_apid >= 0) {
++		WARN("SPMI_ARB: no apid for addr=0x%x owned by this EE=%u; falling back to apid=%d owned by another EE -- HW will likely deny the access\n",
++		     addr, (unsigned int)SPMI_ARB_OWNER_EE, fallback_apid);
++		return fallback_apid;
++	}
++#endif
++
+ 	return -1;
+ }
+ 
+diff --git a/plat/qti/wildcat/nord/inc/platform_def.h b/plat/qti/wildcat/nord/inc/platform_def.h
+index 675c7c902..05b0d3cb4 100644
+--- a/plat/qti/wildcat/nord/inc/platform_def.h
++++ b/plat/qti/wildcat/nord/inc/platform_def.h
+@@ -165,6 +165,39 @@
+ #define PON_PS_HOLD_RESET_CTL 0x852
+ #define PON_PS_HOLD_RESET_CTL2 0x853
+ 
++#define SPMI_ARB_APID_MAP_BASE	0x0C402000U
++#define SPMI_ARB_CHNL_BASE	0x0C500000U
++#define SPMI_ARB_CHNL_STRIDE	0x1000U
++#define SPMI_ARB_NUM_APID	1024U
++
++#define SPMI_ARB_OWNER_MAP_BASE	0x0C42D000U
++#define SPMI_ARB_OWNER_STRIDE	0x4U
++#define SPMI_ARB_OWNER_EE	0U
++
++/*----------------------------------------------------------------------------*/
++/* Nord MD to SAIL communication registers and values                          */
++/*----------------------------------------------------------------------------*/
++#define QTI_TCSR_MAIN2SAIL_GP_NONSEC_STATUS7_REG	U(0x01F7A028)
++#define QTI_TCSR_MAIN2SAIL_GP_NONSEC_STATUS8_REG	U(0x01F7A02C)
++#define QTI_TCSR_SAIL2MAIN_GP_NONSEC_SHADOW_STATUS4_REG	U(0x01F7B014)
++
++#define QTI_APSS_INTU_TZ_IPC_INTERRUPT			U(0x17824004)
++#define QTI_APSS_INTU_TZ_IPC_INTERRUPT_SMSS_TZ_IPC_BMSK	U(0x0080000)
++
++#define QTI_MD_SD_MSG_TYPE_SHIFT	U(16)
++#define QTI_MD_SD_MSG_TYPE_MASK		(U(0xFF) << QTI_MD_SD_MSG_TYPE_SHIFT)
++#define QTI_MD_SD_SUBSYS_TYPE_SHIFT	U(24)
++#define QTI_MD_SD_SUBSYS_TYPE_MASK	(U(0xFF) << QTI_MD_SD_SUBSYS_TYPE_SHIFT)
++
++#define QTI_SAIL_RESET_READY		U(0xA0300100)
++#define QTI_PSCI_GRACEFUL_SHUTDOWN_CMD	U(0x5AF00004)
++#define QTI_PSCI_HARD_RESET_CMD		U(0x5AF00005)
++#define QTI_MD_GRACEFUL_SHUTDOWN	U(0xB2200430)
++#define QTI_MD_SOC_HR			U(0xB2200510)
++#define QTI_MD_SD_TZ_SRC		U(0xB2)
++#define QTI_MD_SD_NO_ACK		U(0x10)
++#define QTI_MD_SD_WAIT_FOR_ACK		U(0x20)
++
+ /*
+  * The Qualcomm QGIC2 implementation seems to have PIDR0-4 and PIDR4-7
+  * erroneously swapped for some reason. PIDR2 is actually at 0xFD8.

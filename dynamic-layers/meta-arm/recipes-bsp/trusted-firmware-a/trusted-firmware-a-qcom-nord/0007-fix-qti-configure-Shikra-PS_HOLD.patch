@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Date: Fri, 20 Nov 2026 11:11:21 +0530
+Subject: [PATCH 07/10] fix(qti): configure Shikra PS_HOLD
+
+Use the Shikra v5.1 offsets for both PS_HOLD reset-control registers:
+0x85A and 0x85B.
+
+Assisted-by: GPT-5.6
+Change-Id: I3b7298381d161e8f523df7b949d2419244b9995a
+Link: https://review.trustedfirmware.org/c/56747
+Signed-off-by: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Upstream-Status: Backport [https://github.com/qualcomm-linux/trusted-firmware-a/commit/e60744d954335abb8f23bd8ea2cf7027ea472596]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/bruin/shikra/inc/shikra_def.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/plat/qti/bruin/shikra/inc/shikra_def.h b/plat/qti/bruin/shikra/inc/shikra_def.h
+index 948ad3225..3c97e6d07 100644
+--- a/plat/qti/bruin/shikra/inc/shikra_def.h
++++ b/plat/qti/bruin/shikra/inc/shikra_def.h
+@@ -185,8 +185,8 @@
+ /*----------------------------------------------------------------------------*/
+ /* LC PON register offsets */
+ /*----------------------------------------------------------------------------*/
+-#define PON_PS_HOLD_RESET_CTL			0x852
+-#define PON_PS_HOLD_RESET_CTL2			0x853
++#define PON_PS_HOLD_RESET_CTL			0x85A
++#define PON_PS_HOLD_RESET_CTL2			0x85B
+ /*----------------------------------------------------------------------------*/
+ /* APSS HM registers */
+ /*----------------------------------------------------------------------------*/

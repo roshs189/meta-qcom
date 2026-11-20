@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Somesh Velupally <somegupt@qti.qualcomm.com>
+Date: Mon, 16 Nov 2026 18:37:13 +0530
+Subject: [PATCH 03/10] build(qti-accesscontrol): add xpu_version selector and
+ xpu4 build support
+
+access_control.mk now accepts XPU_VERSION (3 or 4, defaulting to 3). XPU_VERSION=4 pulls in the xpu4 driver sources and the config-image reader instead of the cfg/${CHIPSET} compile-time tables.
+  XPU_VERSION=3 preserves the existing behaviour; CHIPSET is still required when building for XPU3.
+
+Signed-off-by: Somesh Velupally <somegupt@qti.qualcomm.com>
+Upstream-Status: Backport [https://github.com/qualcomm-linux/trusted-firmware-a/commit/a4a33cee2f470924ca844baaf38b557edd61bf32]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ drivers/qti/accesscontrol/access_control.mk | 38 +++++++++++++++++++--
+ 1 file changed, 35 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/qti/accesscontrol/access_control.mk b/drivers/qti/accesscontrol/access_control.mk
+index 3490438f5..71ab24107 100644
+--- a/drivers/qti/accesscontrol/access_control.mk
++++ b/drivers/qti/accesscontrol/access_control.mk
+@@ -9,6 +9,21 @@ PLAT_DRIVERS_INCLUDE_PATH	:=	include/drivers/qti
+ 
+ ACCESSCONTROL_PATH		:=	$(PLAT_DRIVERS_PATH)/accesscontrol
+ 
++##
++## XPU_VERSION selects the XPU hardware generation. Exactly one generation is
++## linked into a build.
++##
++##   3 - Configuration comes from compile-time tables in cfg/${CHIPSET}.
++##   4 - Configuration is fetched at runtime from the access-control config
++##       image, whose base address the platform supplies. XPU4 targets have no
++##       cfg/${CHIPSET} directory at all, so nothing under cfg/ may be
++##       referenced from the XPU4 block below.
++##
++XPU_VERSION ?= 3
++
++ifeq ($(filter ${XPU_VERSION},3 4),)
++    $(error XPU_VERSION must be 3 or 4, got '${XPU_VERSION}')
++endif
+ 
+ PLAT_INCLUDES +=	-I$(ACCESSCONTROL_PATH) \
+ 			-I$(PLAT_DRIVERS_INCLUDE_PATH)/accesscontrol
+@@ -17,17 +32,32 @@ PLAT_INCLUDES +=	-I$(ACCESSCONTROL_PATH) \
+ ## the interface in xpu_common.h.
+ BL31_SOURCES +=		$(ACCESSCONTROL_PATH)/access_control.c
+ 
+-## VMIDMT generic sources. Configuration provider implementing vmidmt_cfg.h is
+-## supplied by the cfg/${CHIPSET} directory.
++## VMIDMT generic sources. Where its configuration comes from is revision
++## specific, so the provider that implements src/vmidmt/vmidmt_cfg.h is added
++## by the XPU_VERSION block below.
+ PLAT_INCLUDES +=	-I$(ACCESSCONTROL_PATH)/vmidmt
+ 
+ BL31_SOURCES +=		$(ACCESSCONTROL_PATH)/vmidmt/vmidmt.c \
+ 			$(ACCESSCONTROL_PATH)/vmidmt/vmidmt_hal.c
++ifeq (${XPU_VERSION},4)
++
++## XPU4: every table is parsed out of the access-control config image at
++## runtime, so no cfg/${CHIPSET} include path or source is used here. The
++## VMIDMT configuration comes from the same image.
++PLAT_INCLUDES +=	-I$(ACCESSCONTROL_PATH)/xpu4
++
++BL31_SOURCES +=		$(ACCESSCONTROL_PATH)/ac_cfg.c \
++			$(ACCESSCONTROL_PATH)/vmidmt/vmidmt_cfg_ac.c \
++			$(ACCESSCONTROL_PATH)/xpu4/xpu4.c \
++			$(ACCESSCONTROL_PATH)/xpu4/xpu4_hal.c \
++			$(ACCESSCONTROL_PATH)/xpu4/xpu4_isr.c
++
++else
+ 
+ ## XPU3: compile-time configuration tables under cfg/${CHIPSET}. That directory
+ ## also provides the VMIDMT configuration and its target register addresses.
+ ifeq (${CHIPSET},)
+-    $(error CHIPSET must be set for accesscontrol)
++    $(error CHIPSET must be set when XPU_VERSION is 3)
+ endif
+ 
+ PLAT_INCLUDES +=	-I$(ACCESSCONTROL_PATH)/xpu3 \
+@@ -39,3 +69,5 @@ BL31_SOURCES +=		$(ACCESSCONTROL_PATH)/xpu3/xpu3.c \
+ 			$(ACCESSCONTROL_PATH)/cfg/${CHIPSET}/vmidmt_static_config.c \
+ 			$(ACCESSCONTROL_PATH)/cfg/${CHIPSET}/xpu_static_config.c \
+ 			$(ACCESSCONTROL_PATH)/cfg/${CHIPSET}/xpu_target_info.c
++
++endif
