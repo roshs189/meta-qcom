@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Date: Sun, 22 Nov 2026 10:26:58 +0530
+Subject: [PATCH 17/19] feat(qti): enable PSCI SYSTEM_RESET2 support for nord
+
+Nord reuses the common plat/qti/common/src/qti_pm.c and
+pm_ps_hold.c PM backend (unlike hamoa, which has its own
+wildcat_bl31qtilib_pm.c), so the vendor SYSTEM_RESET2 handling
+already added there for hoya/bruin platforms is already reachable
+for nord. Two pieces specific to nord are still missing.
+
+Define PON_SOFT_RB_SPARE and TCSR_BOOT_MISC_DETECT for nord so the
+reboot-reason cookie stash in qti_pmic_prepare_reset2() is enabled
+for it, matching downstream TZ's nord ASIC reset_info_config
+(0x7148) and HWIO_TCSR_BOOT_MISC_DETECT address
+(TCSR_TCSR_REGS_REG_BASE + 0x99000).
+
+Nord also has a companion SAIL die that must be given a heads-up
+before a hard reset tears down PS_HOLD. A vendor hard reset via
+SYSTEM_RESET2 is the same SoC-level event as the architectural
+SYSTEM_RESET, so route it through the qti_sail_comm_system_reset()
+call already used by qti_system_reset(), matching downstream TZ's
+psci_target_system_reset2() ASIC hook, which notifies the SAIL/modem
+subsystem the same way for both reset paths. Warm reset has no
+downstream SAIL notification, so it is left alone.
+
+Move the vendor sub-type mask/values from pm_ps_hold.c to qti_plat.h
+so qti_pm.c can check the resolved sub-type without duplicating them.
+
+Assisted-by: Claude:claude-sonnet-5
+Signed-off-by: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/trusted-firmware-a/pull/135]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/common/inc/qti_plat.h           | 10 ++++++++++
+ plat/qti/common/src/pm_ps_hold.c         | 11 -----------
+ plat/qti/common/src/qti_pm.c             | 10 ++++++++++
+ plat/qti/wildcat/nord/inc/platform_def.h |  8 ++++++++
+ 4 files changed, 28 insertions(+), 11 deletions(-)
+
+diff --git a/plat/qti/common/inc/qti_plat.h b/plat/qti/common/inc/qti_plat.h
+index c74f73909..dd493d5d2 100644
+--- a/plat/qti/common/inc/qti_plat.h
++++ b/plat/qti/common/inc/qti_plat.h
+@@ -51,6 +51,16 @@ void qti_pmic_prepare_reset(void);
+ void qti_pmic_prepare_shutdown(void);
+ int qti_pmic_prepare_reset2(uint32_t reset_type, uint64_t cookie);
+ 
++/*
++ * Vendor SYSTEM_RESET2 sub-types, selected by the low bits of the PSCI
++ * reset_type argument. Mirrors the sub-types of downstream TZ's
++ * pm_app_pon_reset_cfg_type enum that the PMIC PON config actually
++ * distinguishes; any other value is rejected as unsupported.
++ */
++#define QTI_RESET2_TYPE_MASK		0x7fU
++#define QTI_PON_CFG_WARM_RESET		0
++#define QTI_PON_CFG_HARD_RESET		1
++
+ int plat_qti_pwr_domain_on(u_register_t mpidr, int core_pos);
+ void plat_qti_pwr_domain_on_finish(int core_pos, const uint8_t *states);
+ void plat_qti_pwr_domain_off(const uint8_t *states);
+diff --git a/plat/qti/common/src/pm_ps_hold.c b/plat/qti/common/src/pm_ps_hold.c
+index c162da6f4..ffb58712f 100644
+--- a/plat/qti/common/src/pm_ps_hold.c
++++ b/plat/qti/common/src/pm_ps_hold.c
+@@ -23,17 +23,6 @@
+ 
+ #define S2_RESET_EN			BIT(7)
+ 
+-/*
+- * Vendor SYSTEM_RESET2 sub-types, selected by the low bits of the PSCI
+- * reset_type argument. Mirrors the sub-types of downstream TZ's
+- * pm_app_pon_reset_cfg_type enum that shikra's PMIC PON config actually
+- * distinguishes; any other value is rejected as unsupported.
+- */
+-#define QTI_PON_CFG_WARM_RESET		0
+-#define QTI_PON_CFG_HARD_RESET		1
+-
+-#define QTI_RESET2_TYPE_MASK		0x7fU
+-
+ /* Set when the vendor payload carries a reboot-reason cookie update. */
+ #define QTI_RESET2_COOKIE		BIT(16)
+ 
+diff --git a/plat/qti/common/src/qti_pm.c b/plat/qti/common/src/qti_pm.c
+index c6dd93945..1bec50ebc 100644
+--- a/plat/qti/common/src/qti_pm.c
++++ b/plat/qti/common/src/qti_pm.c
+@@ -230,6 +230,16 @@ static int qti_system_reset2(int is_vendor, int reset_type, u_register_t cookie)
+ 		return ret;
+ 	}
+ 
++	/*
++	 * A vendor hard reset is the same SoC-level reset as the
++	 * architectural SYSTEM_RESET, so it needs the same companion SAIL
++	 * die heads-up before PS_HOLD is deasserted. Warm reset has no
++	 * equivalent downstream SAIL notification, so it is left alone.
++	 */
++	if (((uint32_t)reset_type & QTI_RESET2_TYPE_MASK) == QTI_PON_CFG_HARD_RESET) {
++		qti_sail_comm_system_reset();
++	}
++
+ 	assert_ps_hold();
+ }
+ 
+diff --git a/plat/qti/wildcat/nord/inc/platform_def.h b/plat/qti/wildcat/nord/inc/platform_def.h
+index ad4f67851..414f3586d 100644
+--- a/plat/qti/wildcat/nord/inc/platform_def.h
++++ b/plat/qti/wildcat/nord/inc/platform_def.h
+@@ -169,6 +169,14 @@
+ #define QTI_PS_HOLD_REG 0xC264000
+ #define PON_PS_HOLD_RESET_CTL 0x852
+ #define PON_PS_HOLD_RESET_CTL2 0x853
++#define PON_SOFT_RB_SPARE 0x7148
++
++/*
++ * TCSR reboot-reason scratch register (TCSR_TCSR_REGS_REG_BASE + 0x99000,
++ * where TCSR_TCSR_REGS_REG_BASE is CORE_TOP_CSR_BASE-family but at its own
++ * offset on Nord).
++ */
++#define TCSR_BOOT_MISC_DETECT 0x01FD9000
+ 
+ #define SPMI_ARB_APID_MAP_BASE	0x0C402000U
+ #define SPMI_ARB_CHNL_BASE	0x0C500000U

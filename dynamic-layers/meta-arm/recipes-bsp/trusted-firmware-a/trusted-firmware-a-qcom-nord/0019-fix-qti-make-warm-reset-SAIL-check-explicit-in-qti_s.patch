@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Date: Sun, 22 Nov 2026 10:54:24 +0530
+Subject: [PATCH 19/19] fix(qti): make warm-reset SAIL check explicit in
+ qti_system_reset2
+
+Use an explicit "else if (... == QTI_PON_CFG_WARM_RESET)" instead of a
+bare else, so the SAIL notification path visibly matches the
+supported vendor reset sub-types rather than relying on the implicit
+fallthrough.
+
+Assisted-by: Claude:claude-sonnet-5
+Signed-off-by: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/trusted-firmware-a/pull/135]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/common/src/qti_pm.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/plat/qti/common/src/qti_pm.c b/plat/qti/common/src/qti_pm.c
+index d612c4be0..70974739e 100644
+--- a/plat/qti/common/src/qti_pm.c
++++ b/plat/qti/common/src/qti_pm.c
+@@ -238,7 +238,7 @@ static int qti_system_reset2(int is_vendor, int reset_type, u_register_t cookie)
+ 	 */
+ 	if (((uint32_t)reset_type & QTI_RESET2_TYPE_MASK) == QTI_PON_CFG_HARD_RESET) {
+ 		qti_sail_comm_system_reset();
+-	} else {
++	} else if (((uint32_t)reset_type & QTI_RESET2_TYPE_MASK) == QTI_PON_CFG_WARM_RESET) {
+ 		qti_sail_comm_system_warm_reset();
+ 	}
+ 

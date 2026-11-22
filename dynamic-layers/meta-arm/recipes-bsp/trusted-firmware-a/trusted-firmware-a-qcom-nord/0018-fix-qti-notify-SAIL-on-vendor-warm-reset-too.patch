@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Date: Sun, 22 Nov 2026 10:51:47 +0530
+Subject: [PATCH 18/19] fix(qti): notify SAIL on vendor warm reset too
+
+Downstream TZ's tzbsp_psci_status_com() maps PSCI_WARM_RESET_CMD to its
+own SAIL message, MD_SOC_WR (0xB2200320), distinct from hard reset's
+MD_SOC_HR. qti_system_reset2() only notified SAIL for the hard-reset
+vendor sub-type, leaving the companion die unaware of a warm reset.
+
+Add qti_sail_comm_system_warm_reset() alongside the existing
+qti_sail_comm_system_reset()/qti_sail_comm_system_off() and call it for
+the warm-reset sub-type, mirroring hard reset's existing notify-then-
+wait-for-ack handling.
+
+Assisted-by: Claude:claude-sonnet-5
+Signed-off-by: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/trusted-firmware-a/pull/135]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ drivers/qti/sail_comm/sail_comm.c         |  6 ++++++
+ include/drivers/qti/sail_comm/sail_comm.h |  2 ++
+ plat/qti/common/src/qti_pm.c              | 10 ++++++----
+ 3 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/qti/sail_comm/sail_comm.c b/drivers/qti/sail_comm/sail_comm.c
+index d7f50aafa..8e3659ede 100644
+--- a/drivers/qti/sail_comm/sail_comm.c
++++ b/drivers/qti/sail_comm/sail_comm.c
+@@ -29,6 +29,7 @@
+ 
+ #define QTI_SAIL_RESET_READY		U(0xA0300100)
+ #define QTI_MD_GRACEFUL_SHUTDOWN	U(0xB2200430)
++#define QTI_MD_SOC_WR			U(0xB2200320)
+ #define QTI_MD_SOC_HR			U(0xB2200510)
+ #define QTI_MD_SD_TZ_SRC		U(0xB2)
+ #define QTI_MD_SD_NO_ACK		U(0x10)
+@@ -88,6 +89,11 @@ void qti_sail_comm_system_reset(void)
+ 	qti_md_sd_psci_status_com(QTI_MD_SOC_HR);
+ }
+ 
++void qti_sail_comm_system_warm_reset(void)
++{
++	qti_md_sd_psci_status_com(QTI_MD_SOC_WR);
++}
++
+ void qti_sail_comm_system_off(void)
+ {
+ 	qti_md_sd_psci_status_com(QTI_MD_GRACEFUL_SHUTDOWN);
+diff --git a/include/drivers/qti/sail_comm/sail_comm.h b/include/drivers/qti/sail_comm/sail_comm.h
+index 25e8ebb1b..9a5c12cbe 100644
+--- a/include/drivers/qti/sail_comm/sail_comm.h
++++ b/include/drivers/qti/sail_comm/sail_comm.h
+@@ -12,11 +12,13 @@
+ /* Notify a companion SAIL die before the platform powers off or resets. */
+ void qti_sail_comm_system_off(void);
+ void qti_sail_comm_system_reset(void);
++void qti_sail_comm_system_warm_reset(void);
+ 
+ #else
+ 
+ static inline void qti_sail_comm_system_off(void) {}
+ static inline void qti_sail_comm_system_reset(void) {}
++static inline void qti_sail_comm_system_warm_reset(void) {}
+ 
+ #endif /* QTI_SAIL_COMM */
+ 
+diff --git a/plat/qti/common/src/qti_pm.c b/plat/qti/common/src/qti_pm.c
+index 1bec50ebc..d612c4be0 100644
+--- a/plat/qti/common/src/qti_pm.c
++++ b/plat/qti/common/src/qti_pm.c
+@@ -231,13 +231,15 @@ static int qti_system_reset2(int is_vendor, int reset_type, u_register_t cookie)
+ 	}
+ 
+ 	/*
+-	 * A vendor hard reset is the same SoC-level reset as the
+-	 * architectural SYSTEM_RESET, so it needs the same companion SAIL
+-	 * die heads-up before PS_HOLD is deasserted. Warm reset has no
+-	 * equivalent downstream SAIL notification, so it is left alone.
++	 * Both vendor reset sub-types need a companion SAIL die heads-up
++	 * before PS_HOLD is deasserted, same as the architectural
++	 * SYSTEM_RESET: hard reset mirrors qti_system_reset()'s notification,
++	 * while warm reset uses its own distinct SAIL message.
+ 	 */
+ 	if (((uint32_t)reset_type & QTI_RESET2_TYPE_MASK) == QTI_PON_CFG_HARD_RESET) {
+ 		qti_sail_comm_system_reset();
++	} else {
++		qti_sail_comm_system_warm_reset();
+ 	}
+ 
+ 	assert_ps_hold();

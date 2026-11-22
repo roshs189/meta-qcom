@@ -16,6 +16,12 @@ SRC_URI += " \
     file://0011-feat-qti-enable-nord-RPMh-and-CMD-DB-support.patch \
     file://0012-feat-qti-add-nord-clock-driver.patch \
     file://0013-feat-qti-add-secure-HSR-SMMU-support.patch \
+    file://0014-feat-qti-add-PSCI-SYSTEM_RESET2-support.patch \
+    file://0015-feat-qti-extend-reboot-reason-cookie-stash-to-lemans.patch \
+    file://0016-feat-qti-log-SYSTEM_RESET2-parameters.patch \
+    file://0017-feat-qti-enable-PSCI-SYSTEM_RESET2-support-for-nord.patch \
+    file://0018-fix-qti-notify-SAIL-on-vendor-warm-reset-too.patch \
+    file://0019-fix-qti-make-warm-reset-SAIL-check-explicit-in-qti_s.patch \
 "
 
 TFA_PLATFORM = "nord"

@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Date: Sat, 21 Nov 2026 20:33:08 +0530
+Subject: [PATCH 16/19] feat(qti): log SYSTEM_RESET2 parameters
+
+qti_pmic_prepare_reset2() silently acts on reset_type and cookie, so a
+failure to take the expected reset path (e.g. an unsupported vendor
+sub-type, or a cookie that didn't make it into HLOS's reboot-reason)
+leaves no trace to debug from.
+
+Log both parameters on entry.
+
+Assisted-by: Claude:claude-sonnet-5
+Signed-off-by: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/trusted-firmware-a/pull/134]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/common/src/pm_ps_hold.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/plat/qti/common/src/pm_ps_hold.c b/plat/qti/common/src/pm_ps_hold.c
+index 96e3add23..c162da6f4 100644
+--- a/plat/qti/common/src/pm_ps_hold.c
++++ b/plat/qti/common/src/pm_ps_hold.c
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: BSD-3-Clause
+  */
+ 
++#include <common/debug.h>
+ #include <drivers/delay_timer.h>
+ #include <lib/mmio.h>
+ #include <lib/psci/psci.h>
+@@ -61,6 +62,9 @@ int qti_pmic_prepare_reset2(uint32_t reset_type, uint64_t cookie)
+ {
+ 	uint32_t vendor_type = reset_type & QTI_RESET2_TYPE_MASK;
+ 
++	INFO("qti_pmic_prepare_reset2: reset_type=0x%x cookie=0x%llx\n",
++	     reset_type, (unsigned long long)cookie);
++
+ #if defined(PON_SOFT_RB_SPARE) && defined(TCSR_BOOT_MISC_DETECT)
+ 	/*
+ 	 * Stash the reboot-reason cookie the same way downstream TZ does, so

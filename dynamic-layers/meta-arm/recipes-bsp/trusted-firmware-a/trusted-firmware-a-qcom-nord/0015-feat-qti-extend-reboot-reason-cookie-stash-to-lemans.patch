@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Date: Sat, 21 Nov 2026 20:18:23 +0530
+Subject: [PATCH 15/19] feat(qti): extend reboot-reason cookie stash to
+ lemans/kodiak/monaco
+
+qti_pmic_prepare_reset2() only stashes the SYSTEM_RESET2 reboot-reason
+cookie (PON_SOFT_RB_SPARE / TCSR_BOOT_MISC_DETECT) on platforms that
+define both registers, which so far was shikra alone.
+
+Downstream TZ's psci_target_system_reset2() ASIC hooks for lemans,
+kodiak and monaco use the same cookie-stash scheme as shikra, but with
+a different PMIC PON scratch register: reset_info_config.addr is
+0x7148 for all three (vs. shikra's 0x88F), consistent with their PON
+block using different offsets for PON_PS_HOLD_RESET_CTL/CTL2 (0x852/
+0x853 vs. shikra's 0x85A/0x85B). TCSR_BOOT_MISC_DETECT is their shared
+QTI_CORE_TOP_CSR_BASE (0x01f00000) plus the fixed 0xC0000 + 0x13000
+offset, giving 0x1FD3000 - already present and used at that same value
+in lemans's and kodiak's qti_secure_io_cfg.h.
+
+Define both registers for lemans_def.h, kodiak_def.h (covers rb3gen2
+and sc7280_chrome) and monaco_def.h (covers monza), so these platforms
+get the cookie-stash behavior instead of compiling it out.
+
+qcs615 and sc7180 are left out: downstream TZ has no ASIC
+implementation for either, and neither defines QTI_CORE_TOP_CSR_BASE,
+so there's no way to derive TCSR_BOOT_MISC_DETECT, nor a reference
+reset_info_config.addr for PON_SOFT_RB_SPARE.
+
+Assisted-by: Claude:claude-sonnet-5
+Signed-off-by: Dinesh Choudhary <idinesh@qti.qualcomm.com>
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/trusted-firmware-a/pull/134]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ plat/qti/hoya/kodiak/inc/kodiak_def.h | 5 +++++
+ plat/qti/hoya/lemans/inc/lemans_def.h | 5 +++++
+ plat/qti/hoya/monaco/inc/monaco_def.h | 6 ++++++
+ 3 files changed, 16 insertions(+)
+
+diff --git a/plat/qti/hoya/kodiak/inc/kodiak_def.h b/plat/qti/hoya/kodiak/inc/kodiak_def.h
+index 9d02329ca..af09dd433 100644
+--- a/plat/qti/hoya/kodiak/inc/kodiak_def.h
++++ b/plat/qti/hoya/kodiak/inc/kodiak_def.h
+@@ -47,6 +47,7 @@
+ /*----------------------------------------------------------------------------*/
+ #define PON_PS_HOLD_RESET_CTL			0x852
+ #define PON_PS_HOLD_RESET_CTL2			0x853
++#define PON_SOFT_RB_SPARE			0x7148
+ /*----------------------------------------------------------------------------*/
+ /* APSS HM registers */
+ /*----------------------------------------------------------------------------*/
+@@ -67,6 +68,10 @@
+ #define QTI_CORE_TOP_CSR_BASE			0x01f00000
+ #define QTI_CORE_TOP_CSR_BASE_SIZE		0x00100000
+ /*----------------------------------------------------------------------------*/
++/* TCSR reboot-reason scratch register (CORE_TOP_CSR_BASE + 0xC0000 + 0x13000) */
++/*----------------------------------------------------------------------------*/
++#define TCSR_BOOT_MISC_DETECT			0x1FD3000
++/*----------------------------------------------------------------------------*/
+ /* Platform-specific SMMU config base addresses */
+ /*----------------------------------------------------------------------------*/
+ #define QTI_SMMU_CFG_BASE			0x15000000
+diff --git a/plat/qti/hoya/lemans/inc/lemans_def.h b/plat/qti/hoya/lemans/inc/lemans_def.h
+index bfadf1f6c..49cc3ddbd 100644
+--- a/plat/qti/hoya/lemans/inc/lemans_def.h
++++ b/plat/qti/hoya/lemans/inc/lemans_def.h
+@@ -64,6 +64,7 @@
+ /*----------------------------------------------------------------------------*/
+ #define PON_PS_HOLD_RESET_CTL			0x852
+ #define PON_PS_HOLD_RESET_CTL2			0x853
++#define PON_SOFT_RB_SPARE			0x7148
+ /*----------------------------------------------------------------------------*/
+ /* APSS HM registers */
+ /*----------------------------------------------------------------------------*/
+@@ -80,6 +81,10 @@
+ #define QTI_CORE_TOP_CSR_BASE			0x01f00000
+ #define QTI_CORE_TOP_CSR_BASE_SIZE		0x00100000
+ /*----------------------------------------------------------------------------*/
++/* TCSR reboot-reason scratch register (CORE_TOP_CSR_BASE + 0xC0000 + 0x13000) */
++/*----------------------------------------------------------------------------*/
++#define TCSR_BOOT_MISC_DETECT			0x1FD3000
++/*----------------------------------------------------------------------------*/
+ /* QTIMER registers                                                           */
+ /*----------------------------------------------------------------------------*/
+ #define QTI_QTIMER_BASE				0x17C20000
+diff --git a/plat/qti/hoya/monaco/inc/monaco_def.h b/plat/qti/hoya/monaco/inc/monaco_def.h
+index 4b5442252..14873a8d3 100644
+--- a/plat/qti/hoya/monaco/inc/monaco_def.h
++++ b/plat/qti/hoya/monaco/inc/monaco_def.h
+@@ -43,6 +43,7 @@
+ /*----------------------------------------------------------------------------*/
+ #define PON_PS_HOLD_RESET_CTL			0x852
+ #define PON_PS_HOLD_RESET_CTL2			0x853
++#define PON_SOFT_RB_SPARE			0x7148
+ 
+ /*----------------------------------------------------------------------------*/
+ /* APSS HM, AOSS and CORE_TOP_CSR registers */
+@@ -51,6 +52,11 @@
+ #define QTI_AOSS_BASE				0x0b000000
+ #define QTI_CORE_TOP_CSR_BASE			0x01f00000
+ 
++/*----------------------------------------------------------------------------*/
++/* TCSR reboot-reason scratch register (CORE_TOP_CSR_BASE + 0xC0000 + 0x13000) */
++/*----------------------------------------------------------------------------*/
++#define TCSR_BOOT_MISC_DETECT			0x1FD3000
++
+ /*----------------------------------------------------------------------------*/
+ /* QTIMER registers                                                           */
+ /*----------------------------------------------------------------------------*/
