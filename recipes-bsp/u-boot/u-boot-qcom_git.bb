@@ -41,6 +41,9 @@ SRC_URI += " \
     ${@bb.utils.contains('SPL_SIGN_ENABLE', '1', 'file://spl-fit-signature.cfg', '', d)} \
 "
 
+# Nord: reboot-mode support (U-Boot PR #231, merged after the pinned tag).
+SRC_URI:append:nord = " file://nord/0001-workaround-arm64-dts-qcom-nord-ride-add-reboot-mode-.patch"
+
 python __anonymous() {
     ubootconfig = (d.getVar('UBOOT_CONFIG') or "").split()
 
