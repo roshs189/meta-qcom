@@ -1,0 +1,45 @@
+From dbcc9db01edfc1e7bfc4d80bad07ca3e035ea15c Mon Sep 17 00:00:00 2001
+From: Aswin Murugan <aswin.murugan@oss.qualcomm.com>
+Date: Fri, 20 Nov 2026 20:18:30 +0530
+Subject: [PATCH] WORKAROUND: configs: qcom: enable PSCI reset support in
+ defconfigs
+
+Enable CONFIG_SYSRESET_PSCI in the Nord  and Shikra SPL
+defconfigs. This allows reset requests from u-boot proper
+to be serviced through PSCI call.
+
+Signed-off-by: Aswin Murugan <aswin.murugan@oss.qualcomm.com>
+
+Upstream-Status: Backport [https://github.com/qualcomm-linux/u-boot/pull/225]
+Signed-off-by: Roshan Sivakumar <roshs@qti.qualcomm.com>
+---
+ configs/qcom_nord_ride_spl_defconfig | 1 +
+ configs/qcom_shikra_spl_defconfig    | 3 +++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/configs/qcom_nord_ride_spl_defconfig b/configs/qcom_nord_ride_spl_defconfig
+index f1658e74c60c..ddfcc490b819 100644
+--- a/configs/qcom_nord_ride_spl_defconfig
++++ b/configs/qcom_nord_ride_spl_defconfig
+@@ -13,6 +13,7 @@ CONFIG_FASTBOOT_BUF_ADDR=0xbc238000
+ CONFIG_DEFAULT_DEVICE_TREE="nord-ride"
+ CONFIG_TEXT_BASE=0xD8D00000
+ CONFIG_QCOM_GENERATE_MBN=y
++CONFIG_SYSRESET_PSCI=y
+ CONFIG_ENV_IS_IN_SCSI=y
+ CONFIG_ENV_SCSI_PART_USE_TYPE_GUID=y
+ # SCSI partition type GUID for logfs partition
+diff --git a/configs/qcom_shikra_spl_defconfig b/configs/qcom_shikra_spl_defconfig
+index 3467ddac2cf4..5d1bc5d40fe0 100644
+--- a/configs/qcom_shikra_spl_defconfig
++++ b/configs/qcom_shikra_spl_defconfig
+@@ -7,6 +7,9 @@
+ CONFIG_SYS_PBSIZE=1024
+ 
+ CONFIG_SPL=y
++
++CONFIG_SYSRESET_PSCI=y
++
+ CONFIG_SPL_FRAMEWORK=y
+ CONFIG_SPL_OF_CONTROL=y
+ CONFIG_SPL_LIBGENERIC_SUPPORT=y
